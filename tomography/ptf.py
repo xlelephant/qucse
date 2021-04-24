@@ -1,0 +1,623 @@
+# -*- coding: utf-8 -*-
+
+# Tomography of the Process Tensor:
+# "After all, this is the objective of tomography—by performing
+# measurements on a small number of select input states, a complete
+# description of a process can be obtained and predict the output state
+# for any arbitrary input state." [1]
+
+# The map Λ is reconstructed experimentally by determining the output states:
+#                               𝜌′=Λ[𝜌]
+
+# In Choi representation, a.k.a Sudarshan B form, the map Λ acting on 𝜌 is
+# written as:
+#                       Λ̂ [𝜌]=tr_in[(𝟙_out⊗𝜌T)Λ]
+
+# One-step process tensor is also called superchannels.
+
+# Generalization of Λ to multiple steps:
+#       𝑇̂ 𝑁:0[𝐴̂ 𝜇0,…,𝐴̂ 𝜇𝑁−1]=𝑝(𝐴̂ 𝜇0,…,𝐴̂ 𝜇𝑁−1)⋅𝜌(𝐴̂ 𝜇0,…,𝐴̂ 𝜇𝑁−1)
+
+# In the process tensor formalism, it is the action of process tensor 𝑇̂ {𝑁:0}
+# on a general sequence 𝐴_{𝑁−1:0}:
+#       𝑇̂ 𝑁:0[𝐴̂ 𝑁−1:0]=tr𝑖𝑛[(𝟙_out⊗𝐴̂ T𝑁−1:0)𝑇^{𝑁:0}]:=𝜌′(𝐴𝑁−1:0)
+#
+# where {𝐴𝜇⃗} := {𝐴_𝑁−1:0} forms a basis of the space of N sequences of CP
+# operations:
+#               𝐴𝜇⃗ =⊗_𝑘:0~(𝑁−1) 𝐴_𝜇𝑘 at times 𝑡_0,…,𝑡_{𝑁−1}
+
+import numpy as np
+import scipy
+import itertools
+
+from . import qst, qpt
+from .. import qmath, qops
+
+ZERO_RHO_TH = 1E-6
+PMs = qops.PM_DICT.keys()[:9]  # the projectives for QST
+
+
+def basis_ops(group='uc', steps=1, complement=False):
+    if group == 'uc':
+        op_set = list(qops.UC_DICT.keys())
+        fit_set = op_set[0:10]
+    elif group == 'pm':
+        op_set = list(qops.PM_DICT.keys())
+        fit_set = op_set[0:9]
+    elif group == 'cb':
+        op_set = list(qops.CB_SMTC_DICT.keys())
+        fit_set = list(qops.CB_FULL_DICT.keys())
+    else:
+        raise KeyError('invalid group {}'.format(group))
+
+    if complement is False:
+        return [n for n in itertools.product(fit_set, repeat=steps)]
+    elif complement is True:
+        ops_fit = [n for n in itertools.product(fit_set, repeat=steps)]
+        ops_cpl = [n for n in itertools.product(op_set, repeat=steps)]
+        all_fit = 0
+        for op in ops_fit:
+            ops_cpl.remove(op)
+            all_fit += 1
+            print('-', end='')
+        print(all_fit, group + 's was removed.')
+        return ops_cpl
+    elif complement is None:
+        return [n for n in itertools.product(op_set, repeat=steps)]
+
+
+class ProcessTensor(object):
+    """full process tensor"""
+    def __init__(self, T_choi=None, T_mat=None):
+        self.D_S = 2  # dimension of system
+        self.D_E = 2  # dimension of environment
+        self.T_choi = T_choi
+        self.T_mat = T_mat
+        self.basis = 'cb'
+        if self.T_choi is not None:
+            step_els = self.steps_of_tensor(T_choi)
+            self.N = step_els
+        if self.T_mat is not None:
+            step_els = self.steps_of_tensor(T_mat)
+            self.N = step_els
+
+    @staticmethod
+    def choi_order(step_els, reverse=False):
+        """The transpose order of Matrix-formed (A-form) tensor
+        to its Choi state (B-form) representation.
+        Matrix-form is of computational convenience,
+        while the Choi representation is more operational meaningful.
+        According to the index definition in ref[4]:
+
+        # A form:
+        ρ_se(r0 𝜖0:s0 𝛾0)
+        A(r0's0':r0 s0)
+        u(r1 𝜖1 :r0'𝜖0)
+        ---
+        U(r1 𝜖1 ;s1 𝛾1 :r0'𝜖0 s0'𝛾0)
+        A(r1's1' r0's0': r1 s1 r0 s0: 𝟙 𝟙)
+        M(r1's1' r0's0' ;r1 s1 r0 s0 :r2 s2)
+
+        # B form
+        A_choi(𝟙  r1'r1 r0'r0 :𝟙  s1's1 s0's0)
+        T_choi(r2 r1'r1 r0'r0 :s2 s1's1 s0's0)
+
+        ⟨As⟩⋅⎹ρ⟩⟩: (r1's1' r0's0'× r1 s1 r0 s0)(r1 s1 r0 s0)
+        <==>
+        <As_prod>⋅I⊗I <----> tr(⎹00⟩+⎹11⟩×⟨00⎸+⟨11⎸ <As_choi>)
+
+        e.g. Num of steps = 2:
+        A⋅M = ρ_s <As_prod>.transpose(0,4,2,6, 1,5,3,7)
+        """
+        if not reverse:
+            # rk
+            T_order = [[4 * step_els]]
+            # ri',ri
+            T_order += [[2 * i, 2 * (step_els + i)] for i in range(step_els)]
+            # sk
+            T_order += [[4 * step_els + 1]]
+            # si', si
+            T_order += [[2 * i + 1, 2 * (step_els + i) + 1]
+                        for i in range(step_els)]
+            T_order = sum(T_order, [])
+        else:
+            # ri',si'
+            T_order = [[1 + 2 * i, 2 + 2 * step_els + 2 * i]
+                       for i in range(step_els)]
+            # ri ,si
+            T_order += [[2 + 2 * i, 3 + 2 * step_els + i * i]
+                        for i in range(step_els)]
+            # rk ,sk
+            T_order += [0, 1 + 4 * step_els]
+        return T_order
+
+    def steps_of_tensor(self, T):
+        """calculate the step of the 1-qubit (n=D_S) process tensor"""
+        D_S, D_E = self.D_S, self.D_E
+        return int(np.log2(np.size(T) - D_S * D_S) / np.log2(D_S**4))
+
+    def trace_env(rho):
+        return rho.reshape(self.D_S, self.D_E, self.D_S,
+                           self.D_E).trace(axis1=1, axis2=3)
+
+    def A_to_AA(A):
+        """convert local operation (Bilinear) to LeftMatrix form"""
+        if not isinstance(A, np.ndarray):
+            A = qops.get_op(A)
+        elif np.size(A) != self.D_S**2:
+            A = qops.get_op(A)
+        return qmath.super2mat(A)
+
+    def As_to_choi(self, As):
+        D_S, _ = self.D_S, self.D_E
+        step_els = len(As)
+        AsAs = 1
+        for A in As:
+            AA = self.A_to_AA(A)
+            AsAs = qmath.tensor((AA, AsAs))
+        As_vec = AsAs.reshape(-1)
+        As_out_vec = np.einsum(As_vec, [0], np.eye(D_S) / D_S, [1, 2])
+        A_shape = 2 * step_els * [D_S, D_S] + [D_S, D_S]
+        A_tensor = np.reshape(As_out_vec, A_shape)
+        A_choi = np.transpose(A_tensor, self.choi_order(step_els))
+        return A_choi
+
+    # Derive the process tensor
+
+    def fit(self, Bss, rhos, return_all=False, disp=False):
+        """Fit the Matrix formed process tensor
+        e.g. for Bss.shape==(100,4^N)
+        A(100,16^N) ⋅ M(16^n,4) = ρ(100,4)
+        Args:
+            Bss: a list of N-step operators
+            rhos: the output density matrix
+        """
+        if self.N is None:
+            self.N = len(As)
+        else:
+            assert self.N == len(As), "number of steps dismatch!"
+        rho_vec = np.reshape(rhos, (len(rhos), -1))
+        As_vec = []
+        for As in Bss:
+            As = qops.get_ops(As)
+            AsAs = qmath.tensor([qmath.super2mat(A) for A in As[::-1]])
+            As_vec.append(AsAs.reshape(-1))
+        M, resids, rank, s = np.linalg.lstsq(As_vec, rho_vec, rcond=None)
+        if np.size(As[0]) != self.D_S**2:
+            print("Warning: overwrite the dimension of sysytem based on As!")
+        self.D_E = self.D_S = int(np.size(As[0])**0.5)
+        self.T_mat = M
+
+        if disp:
+            print('\nresids is: ', resids, '\nrank is: ', rank, '\ns is: ', s)
+            dim = int(np.size(M)**0.5)
+            print('M is \n', M.reshape(dim, dim))
+        if return_all:
+            return M, resids, rank, s
+        else:
+            return M
+
+    def cal(self, rho_se, Us, return_format='choi'):
+        """The U of us has the index:
+        super2mat(u, u†) = U(r1 𝜖1,s1 𝛾1:r0'𝜖0,s0'𝛾0)
+        => U_Choi(r1 𝜖1 r0'𝜖0 :s1 𝛾1 s0'𝛾0)
+        => Us_Choi(r2 𝜖2 r1'𝜖1 ,r1 𝜖1 r0'𝜖0 : s2 𝛾2 s1'𝛾1, s1 𝛾1 s0'𝛾0)
+        T_se_tensor = Us_Choi_k ⊗... Us_Choi_0 ⊗ rho_se
+        => (r2 𝜖2 r1'𝜖1; r1 𝜖1 r0'𝜖0; r0 𝜖0 :: s2 𝛾2 s1'𝛾1; s1 𝛾1 s0'𝛾0; s0 𝛾0)
+        =>     |     |______|     |______|        |     |______|     |______|
+               |__________________________________|
+        => tr_se(T) = ∑_𝜖𝛾 𝜌_se ⋅ (Π_k-1:0 U_k) ⋅ 𝛿𝜖𝛾
+        =>T_Choi(r2 r1'r1 r0'r0 :: s2 s1's1 s0's0)
+        """
+        if self.N is None:
+            self.N = len(Us)
+        else:
+            assert self.N == len(Us), "number of steps dismatch!"
+        D_S, D_E = self.D_S, self.D_E
+        dim_U_choi = (D_S * D_E)**2
+        Us_choi = 1
+        for op in Us:
+            u = qops.get_op(op) if isinstance(op, str) else op
+            U = qmath.super2mat(u)
+            U_tensor = np.reshape(U, 4 * [D_S, D_E])
+            U_choi = np.transpose(U_tensor, [0, 1, 4, 5] + [2, 3, 6, 7])
+            U_choi = np.reshape(U_choi, (dim_U_choi, dim_U_choi))
+            Us_choi = qmath.tensor((U_choi, Us_choi))
+        T_se_shape = 2 * (2 * self.N + 1) * [D_S, D_E]
+        T_se_tensor = np.reshape(qmath.tensor((Us_choi, rho_se)), T_se_shape)
+        tensor_order = len(T_se_shape)
+        trace_eg_idx = np.arange(tensor_order)
+        for i in range(self.N):
+            implicit_e_idx = -(4 * i + 2 + 1 + tensor_order // 2)
+            trace_eg_idx[implicit_e_idx + 2] = trace_eg_idx[implicit_e_idx]
+            implicit_g_idx = -(4 * i + 2 + 1)
+            trace_eg_idx[implicit_g_idx + 2] = trace_eg_idx[implicit_g_idx]
+        explicit_e_idx = 1
+        explicit_g_idx = tensor_order // 2 + 1
+        trace_eg_idx[explicit_g_idx] = trace_eg_idx[explicit_e_idx]
+        self.T_choi = np.einsum(T_se_tensor, trace_eg_idx)
+        if return_format == 'choi':
+            return self.T_choi
+        else:
+            self.T_mat = self.choi_to_matrix(self.T_choi)
+            return self.T_mat
+
+    def _simulate_process(self, rho0, As, Us):
+        """Simulate the dynamics in the process tensor framework"""
+        rho_se = rho0
+        for A, U in zip(As, Us):
+            A = tomo.get_op(A)
+            U = tomo.get_op(U) if isinstance(U, str) else U
+            A_se = qmath.tensor((A, self.D_E))
+            rho_se = A_se @ rho_se @ A_se.conjugate().transpose()
+            rho_se = U @ rho_se @ U.conjugate().transpose()
+        return rho_se
+
+    def sim(self, rho_se, Bss, Us, return_all=False, disp=True):
+        """Simulate the closed two-qubit evolution process and fit the
+        process tensor of 1-qubit open quantum evolution"""
+        assert len(Bss[0]) == len(Us), '# Ctrl Ops should be paired with U_se'
+        rhos = []
+        for As in Bss:
+            rho_se = self._simulate_process(rho_se, As, Us)
+            rho_se = np.reshape(rho_se, (D_S, D_E, D_S, D_E))
+            rho_m = np.trace(rho_se, axis1=1, axis2=3)
+            rhos.append(rho_m)
+        return ptf.ProcessTensor().fit(Bss,
+                                       rhos,
+                                       return_all=return_all,
+                                       disp=disp)
+
+    def qmap_prod_tensor(rho0, Chis):
+        """Convert the quantum process to process tensor (Markovian)"""
+        num_steps = len(Chis)
+        Bss_ops = basis_ops(basis, num_steps, complement=False)
+        rhos_out = []
+        for Bss_op in Bss_ops:
+            rhos_out.append(
+                self.reconstruct(Bss_op, Chis, rho0, method='pqmaps'))
+        M, resids, rank, s = ptm(Bss_ops, rhos_out, disp=False)
+        self.T_choi_prod = self.matrix_to_choi(M)
+        return self.T_choi_prod
+
+    def reconstruct(As, T=None, rho_in=None, method='matrix'):
+        """method could be matrix or choi or pqmaps"""
+        D_S, _ = self.D_S, self.D_E
+        if method == 'matrix':
+            T = self.T_mat if T is None else T
+            AsAs = qmath.tensor([A_to_AA(A) for A in As[::-1]])
+            rho_m = np.reshape(np.dot(AsAs.reshape(-1), T), (D_S, D_S))
+
+        elif method == 'choi':
+            As_choi = self.As_to_choi(As)
+            T = self.T_choi if T is None else T
+            T_sum_idx = np.arange(len(np.shape(T)))
+            T_sum_idx[0] = 4 * self.N + 2
+            T_sum_idx[2 * self.N + 1] = 4 * self.N + 3
+            A_sum_idx = np.arange(len(np.shape(As_choi)))
+            A_sum_idx[0] = 0
+            A_sum_idx[2 * self.N + 1] = 0
+            rho_m = np.einsum(T, T_sum_idx, As_choi, A_sum_idx)
+
+        elif method == 'pqmaps':
+            Chis = self.Chis if T is None else T
+            chi_dim = qmath.square_matrix_dim(self.Chis[0])
+            if chi_dim == D_S**2:
+                rho_dim = qmath.square_matrix_dim(rho_in)
+                rho_in = self.trace_env(rho_in) if rho_dim != D_S else rho_in
+                for A, Chi in zip(As, Chis):
+                    if qmath.square_matrix_dim(A) == D_S**2:
+                        A_chi = A
+                        rho_in = qpt.cal_process_rho(rho_in, A_chi)
+                    else:
+                        A = qops.get_op(A)
+                        rho_in = A @ rho_in @ A.conjugate().transpose()
+                    rho_out = qpt.cal_process_rho(rho_in, Chi)
+                    rho_in = rho_out
+                rho_m = rho_in
+            elif chi_dim == (D_S * D_E)**2:
+                rho_in = rho0
+                for A, Chi in zip(As, Chis):
+                    if qmath.square_matrix_dim(A) == D_S**2:
+                        rho_in = qpt.cal_process_rhose(rho_in, A, QPT_BASIS)
+                    else:
+                        A = qops.get_op(A)
+                        A_se = qmath.tensor([A, I_E])
+                        rho_in = A_se @ rho_in @ A_se.conjugate().transpose()
+                    rho_out = qpt.cal_process_rho(rho_in, Chi)
+                    rho_in = rho_out
+                rho_m = trace_env(rho_in)
+            else:
+                raise NotImplementedError
+        return rho_m
+
+    # Transformations
+
+    def matrix_to_choi(self, T_mat=None):
+        T_mat = self.T_mat if T_mat is None else T_mat
+        D_S, _ = self.D_S, self.D_E
+        step_els = self.steps_of_tensor(T_mat)
+        T_shape = 2 * step_els * [D_S, D_S] + [D_S, D_S]
+        T_mtensor = np.reshape(T_mat, T_shape)
+        return np.transpose(T_mtensor, self.choi_order(step_els))
+
+    def choi_to_matrix(self, T_choi=None):
+        T_choi = self.T_choi if T_choi is None else T_choi
+        D_S, _ = self.D_S, self.D_E
+        step_els = self.steps_of_tensor(T_choi)
+        M_tensor = np.transpose(T_choi, self.choi_order(step_els,
+                                                        reverse=True))
+        return np.reshape(M_tensor, ((D_S**4)**step_els, D_S**2))
+
+    def _lam_to_chi(self, T_choi):
+        """Convert the process tensor to Chi Matrix, using op=PMs
+        If the output is not as predicted by the linear map (QPT), then the
+        process is bilinear, indicating the exsitence of SE correlation. [6]
+        """
+        rhos_in = []
+        rhos_out = []
+        for pm_op in qops.PM_FULL_BASIS:
+            pm = qops.get_op(pm_op)
+            rho_m = self.reconstruct([pm], T_choi, method='choi')
+            # see the normalize factor Γ_n - [4](III) [5](Appendix.B)
+            # rho_m = qmath.unit_trace(rho_m)  # rho_out should be normalized too
+            if (abs(rho_m) < ZERO_RHO_TH).all():
+                print('Prob of As {} is small for QPT, discard!'.format(pm_op))
+                continue
+            rho_m = rho_m / np.trace(rho_m)  # / 1.0
+            rhos_in.append(pm)  # * np.trace(rho_m) same as the left
+            rhos_out.append(rho_m)
+        return qpt.qpt(rhos_in, rhos_out)
+
+    def choi_to_qmaps(self):
+        """𝚼(choi state of T) = (⨂_1~k Λ_k:k-1)⊗ρ0"""
+        A_s_rho0 = ['I'] * self.N
+        self.rho0 = self.trace(A_s_rho0, out_idx=0)
+        Lambdas = []
+        Chis = []
+        for i in range(self.N):
+            A_s_lam = ['I'] * self.N
+            A_s_lam[i] = None
+            T_lam = self.trace(A_s_lam, out_idx=i + 1)
+            Lambdas.append(T_lam)
+            Chis.append(self._lam_to_chi(T_lam))
+        self.Chis = Chis
+        self.Lambdas = Lambdas
+        return self.rho0, self.Chis, self.Lambdas
+
+    def trace(self, As, T_choi=None, out_idx=-1):
+        """
+        T_Choi(r2 r1'r1 r0'r0 :: s2 s1's1 s0's0)
+        A_Choi( 𝟙 r1'r1 r0'r0 ::  𝟙 s1's1 s0's0)
+        MES/IΨ(|r1's1'><r1 s1 |⊗|r0's0'><r0 s0 |)
+        tensor(r1's1'r0's0' : r1 s1 r0 s0 : 𝟙 𝟙)
+        Ψ+Choi( 𝟙 r1'r1 r0'r0 ::  𝟙 s1's1 s0's0)
+        Args:
+            As, <list of A>, for example of 2 step process:
+            [None, None] gives the original process tensor.
+            [None, 'MIS'], out_idx=1: gives the contracted process tensor of
+                the first step, ignoring the last step. (Maximally Mixed State)
+            [I, None] gives the contracted process tensor of the last step,
+                conditioned on the I operation on the fist step
+            [A0, None] gives the averaged system state after the 1st step
+                A0-U1:0 conditioned on operation A1 at the second step.
+            ['MIS', 'MIS'], out_idx=0: gives the initial averaged system state.
+            [I, I] gives the final averaged system state.
+        ref [4] IV C
+        ref [5] Appendix A3"""
+        if T_choi is None:
+            T_choi = self.T_choi
+            step_els = self.N
+        else:
+            step_els = self.steps_of_tensor(T_choi)
+        D_S, _ = self.D_S, self.D_E
+
+        A_sum_ix = []
+        trace_els = 0
+        AsAs = 1
+        out_idx = ((step_els + 1) + out_idx) % (step_els + 1)
+        A_o_step = out_idx
+        for i in range(step_els):
+            A = qops.get_op(As[i]) if not isinstance(As[i], np.ndarray) else A
+            if A is None:
+                assert out_idx > i, "Output must go beyond the contracted tensor!"
+                A_o_step -= 1
+                continue
+            elif isinstance(A, np.ndarray):
+                # (Λ⊗𝟙)[Ψ+] is just the choi-ordered AA
+                AA = qmath.super2mat(A)
+                trace_els += 1
+            else:
+                raise ValueError("{} is not supported!".format(A))
+            AsAs = qmath.tensor((AA, AsAs))
+            A_sum_ix.insert(0, 2 * (step_els - i))
+            A_sum_ix.insert(0, 2 * (step_els - i) - 1)
+        # return origin tensor
+        if trace_els == 0:
+            return T_choi
+        As_vec = AsAs.reshape(-1)
+        As_out_vec = np.einsum(As_vec, [0], np.eye(D_S) / D_S, [1, 2])
+        A_shape = 2 * trace_els * [D_S, D_S] + [D_S, D_S]
+        A_tensor = np.reshape(As_out_vec, A_shape)
+        A_choi = np.transpose(A_tensor, self.choi_order(trace_els))
+        A_sum_ix = np.array([0] + A_sum_ix)
+        A_sum_idx = np.hstack([A_sum_ix, A_sum_ix + 2 * step_els + 1])
+        T_sum_idx = np.arange(len(np.shape(T_choi)))
+        # T_Choi(r2 r1'r1 r0'r0 :: s2 s1's1 s0's0)
+        # A_Choi( 𝟙 no'no r0'r0 ::  𝟙 no'no s0's0)
+        # a:      tr                tr           -> last step
+        #     (MIS)             (MIS)
+        # b:           tr                tr      -> intermediate step
+        #           MIS               MIS
+        TA_o_trace_p = 2 * (2 * step_els + 1)
+        A_o_idx_r = 2 * (trace_els - A_o_step)
+        A_o_idx_s = A_o_idx_r + 2 * trace_els + 1
+        A_sum_idx[A_o_idx_r] = TA_o_trace_p
+        A_sum_idx[A_o_idx_s] = TA_o_trace_p
+        # print('trace index are  ', T_sum_idx, A_sum_idx)
+        return np.einsum(T_choi, T_sum_idx, A_choi, A_sum_idx)
+
+    def non_markovianity(self):
+        basis = self.basis
+        assert self.N == 1
+        # Method 1
+        rho0, Chis, _ = self.choi_to_qmaps()
+        # assert np.allclose(T_choi, Lambdas[0])
+        # fig, ax = None, None
+        # qpt_labels = tomo.op_products(qpt.pauli_vector_ops, 1)
+        # fig, ax = tomography.plot_chi(Chis[0], qpt_labels, alpha=0.8, fig=fig,
+        #                               ax=ax)
+        # plt.show()
+        T_markov = qmap_prod_tensor(rho0, Chis, basis=basis)
+        # Method 2
+        # rho1_avg = np.einsum(T_choi, [0, 3, 1, 0, 3, 2])
+        # rho1_avg = np.einsum(T_choi, [0, 0, 1, 0, 0, 2])
+        # print("averga rho1 ", rho1_avg)
+        # print("averga rho1 --> ", rho1_avg)
+        # lam21 = np.trace(T_choi, axis1=2, axis2=5).reshape(4, 4)
+        # T_markov = qmath.tensor([qmath.matrixize(lam21), rho1_avg])
+
+        choi_state_corlat = qmath.matrixize(self.T_choi)
+        choi_state_markov = qmath.matrixize(T_markov)
+        # assert np.allclose(choi_state_corlat * 2, choi_state_markov, rtol=5E-2,
+        #                    atol=1E-2), '\n{}\n{}'.format(choi_state_corlat * 2,
+        #                                                  choi_state_markov)
+        D_relative_entropy = qmath.relative_entropy(choi_state_corlat,
+                                                    choi_state_markov)
+        # D_relative_entropy = np.linalg.norm(
+        #     abs(choi_state_corlat - choi_state_markov))
+        return D_relative_entropy
+
+
+class PTensorUC(ProcessTensor):
+    def __init__(self):
+        super().__init__()
+        self.basis = 'uc'
+
+    def trace(self, ops, out_idx=-1):
+        raise NotImplementedError('Trace function is not supported!')
+
+
+class PTensorPM(ProcessTensor):
+    def __init__(self):
+        super().__init__()
+        self.basis = 'pm'
+
+    def trace(self, As, T_choi=None, out_idx=-1, int_ops=['Pz+', 'Pz-']):
+        """
+        T_Choi(r2 r1'r1 r0'r0 :: s2 s1's1 s0's0)
+        A_Choi( 𝟙 r1'r1 r0'r0 ::  𝟙 s1's1 s0's0)
+        Args:
+            As, <list of A>, for example of 2 step process:
+            [None, None] gives the original process tensor.
+            [None, 'I'], out_idx=1: gives the contracted process tensor of
+                the first step, ignoring the last step.
+                We use [Pz+, Pz-] as "Do nothing" operator. -[5](APPENDIX B)
+        Returns:
+            if None in As: The contracted pm tensor T_k:j
+            else: <rho_avg, herald_rate> the average rho at out_idx
+        ref: [5] Appendix B
+        """
+        if T_choi is None:
+            T_choi = self.T_choi
+            step_els = self.N
+        else:
+            step_els = self.steps_of_tensor(T_choi)
+        D_S, _ = self.D_S, self.D_E
+        assert len(As) == step_els
+
+        TRACE_IM_MAX = 1E-6
+        out_step_mrk = np.array([1 if A is None else 0 for A in As])
+        out_step_els = sum(out_step_mrk)
+        out_idx = ((step_els + 1) + out_idx) % (step_els + 1)
+        # return a intermediate state
+        if not out_step_els:
+            A_s = list(As)
+            # return the final step, this should be the same as trace_tensor()
+            if out_idx == step_els:
+                int_steps = []
+                int_els = 0
+                for i, A in enumerate(A_s):
+                    if np.allclose(qops.get_op(A), np.eye(D_S)):
+                        int_steps.append(i)
+                        int_els += 1
+                ints_pms = list(itertools.product(int_ops, repeat=int_els))
+                rho_avg = 0
+                for pms in ints_pms:
+                    for i, pm in zip(int_steps, pms):
+                        A_s[i] = pm
+                    As_choi = self.As_to_choi(A_s)
+                    rho_avg += self.reconstruct(As_choi, T_choi, method='choi')
+            # return the intermediate state
+            else:
+                Bss_ops = ['Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+']
+                qst_basis = 'tomo'
+                B_probs = []
+                int_steps = []
+                int_els = 0
+                A_s[out_idx] = 'pm_x'  # set op_A in out_idx to qst basis
+                for i, A in enumerate(A_s):
+                    if np.allclose(qops.get_op(A), np.eye(D_S)):
+                        int_steps.append(i)
+                        int_els += 1
+                ints_pms = list(itertools.product(int_ops, repeat=int_els))
+                for Bss_op in Bss_ops:
+                    p_k_int = 0
+                    for pms in ints_pms:
+                        for i, pm in zip(int_steps, pms):
+                            A_s[i] = pm
+                        A_s[out_idx] = Bss_op
+                        As_choi = self.As_to_choi(A_s)
+                        rho_int_k = self.reconstruct(As_choi,
+                                                     T_choi,
+                                                     method='choi')
+                        p_k_int += np.trace(rho_int_k)
+                    assert p_k_int.imag < TRACE_IM_MAX
+                    B_probs.append(p_k_int)
+                rho_avg = qst.qst(np.array(B_probs).reshape(3, 2), qst_basis)
+            return rho_avg
+        else:
+            # return a contracted process tensor
+            # loop over fit basis (B_k:j)
+            Bss_ops = basis_ops('pm', out_step_els, complement=False)
+            rhos_out = []
+            for Bss_op in Bss_ops:
+                A_s = [A for A in As]
+                # put Bs fit to None of As
+                Bs_els = 0
+                for i in range(step_els):
+                    if A_s[i] is None:
+                        A_s[i] = Bss_op[Bs_els]
+                        Bs_els += 1
+                # Now calcuate the rho * p at out_idx
+                rho_k = self.trace(A_s, T_choi, out_idx=out_idx)
+                rhos_out.append(rho_k)
+            # tomography.plotTrajectory(rhos_out)
+            M, resids, rank, s = self.fit(Bss_ops, rhos_out, disp=False)
+            T_choi = self.matrix_to_choi(M)
+            return T_choi
+
+
+# REFERENCES:
+# [1] Kuah, A. M., Modi,... & Sudarshan, E. C. G. (2007).
+# How state preparation can affect a quantum experiment:
+# Quantum process tomography for open systems.
+# Physical Review A, 76(4), 1–12. https://doi.org/10.1103/PhysRevA.76.042113
+
+# [2] Modi, K. (2012). Operational approach to open dynamics and quantifying
+# initial correlations. Scientific Reports, 2.
+# https://doi.org/10.1038/srep00581
+
+# [3] Milz, S., Pollock, F. A., & Modi, K. (2017).
+# An Introduction to Operational Quantum Dynamics.
+# Open Systems and Information Dynamics, 24(4), 1–35.
+# https://doi.org/10.1142/S1230161217400169
+
+# [4] Pollock, F. A., Rodríguez-Rosario, C., Frauenheim, T., Paternostro, M.,
+# & Modi, K. (2018). Non-Markovian quantum processes:
+# Complete framework and efficient characterization.
+# Physical Review A, 97(1), 1–13. https://doi.org/10.1103/PhysRevA.97.012127
+
+# [5] Milz, S., Pollock, F. A., & Modi, K. (2018).
+# Reconstructing non-Markovian quantum dynamics with limited control.
+# Physical Review A, 98(1), 1–14. https://doi.org/10.1103/PhysRevA.98.012108
