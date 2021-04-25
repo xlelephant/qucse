@@ -226,15 +226,6 @@ def random_pm():
     return polar2pm(*random_theta_phi())
 
 
-def random_op(op='uc'):
-    if op == 'uc':
-        return random_su(2)
-    elif op == 'pm':
-        return random_pm()
-    else:
-        raise KeyError
-
-
 # tensor operators
 
 

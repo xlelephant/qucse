@@ -30,8 +30,7 @@
 import numpy as np
 from scipy import optimize
 
-from . import qmath
-from .tomo import get_ops, gen_tomo3_us, PM_OCTOMO_BASIS, PM_FULL_BASIS
+from .. import qmath, qops
 
 DTYPE = qmath.CPLX_TYPE
 
@@ -65,8 +64,7 @@ def qst_basis_mat(Us, key=None):
     n_diag = qmath.square_matrix_dim(Us[0])  #   --> k
 
     Um = np.array([
-        qmath.super2mat(Us[j, k, :], Us[j, k, :].conj())
-        for j in range(num_Us)
+        qmath.super2mat(Us[j, k, :], Us[j, k, :].conj()) for j in range(num_Us)
         for k in range(n_diag)
     ], dtype=DTYPE)
     # Note the order of qmath.super2mat does not matter if Us is just a vector
@@ -78,53 +76,47 @@ def qst_basis_mat(Us, key=None):
     return Um
 
 
-tomo_ops = ['I', 'X/2', 'Y/2']
-octomo_ops = ['I', 'X/2', 'Y/2', '-X/2', '-Y/2', 'X']
-nonetomo_ops = [
-    'I', 'XY', 'YX', '-XY', '-YX', 'XY/2', 'YX/2', '-XY/2', '-YX/2'
-]
+tomo_basis_ops = {
+    'tomo': ['I', 'X/2', 'Y/2'],
+    # QST_PMs = ['Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+']
+    'octomo': ['I', 'X/2', 'Y/2', '-X/2', '-Y/2', 'X'],
+    'nonetomo':
+    ['I', 'XY', 'YX', '-XY', '-YX', 'XY/2', 'YX/2', '-XY/2', '-YX/2'],
+    'smtc_tomo':
+    ['I', 'X/2', 'Y/2', 'XY/2', 'YX/2', '-Y/4', 'X/4', 'Y/4', '-X/4'],
+    # QST_PMs = ['Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+',
+    #            'Pyx+', 'Pyx-', 'Pxy-', 'Pxy+', 'Pxz+', 'Pxz-', 'Pyz+', 'Pyz-',
+    #            'Pzx+', 'Pzx-', 'Pzy+', 'Pzy-']
+    'pm_tomo': ['Pz+', 'Py+', 'Px-'],
+    'pm_full': list(qops.PM_DICT.keys())[:9],
+    'pm_smtc': list(qops.PM_DICT.keys())
+}
+for k, v in tomo_basis_ops.items():
+    # 1-qubit
+    qst_basis_mat(qops.get_ops(v), k)
+    # 2-qubit
+    qst_basis_mat(qmath.tensor_combinations(qops.get_ops(v), 2),
+                  k + '_2qubits')
+    # # 3-qubit
+    # qst_basis_mat(qmath.tensor_combinations(qops.get_ops(v), 3),
+    #               k + '_3qubits')
 
-pm_octomo_ops = PM_OCTOMO_BASIS  # ['Pz+', 'Pz-', 'Px+', 'Px-', 'Py+', 'Py-']
-pm_full_ops = PM_FULL_BASIS
+# # Qutrit(3-level) tomo
 
-tomo_us = get_ops(tomo_ops)
-octomo_us = get_ops(octomo_ops)
-nonetomo_us = get_ops(nonetomo_ops)
-pm_octomo_us = get_ops(pm_octomo_ops)
-pm_full_us = get_ops(pm_full_ops)
+# tomo3_ops = [("I", "I"), ("X/2", "I"), ("Y/2", "I"), ("X", "I"), ("I", "X/2"),
+#              ("I", "Y/2"), ("X", "X/2"), ("X", "Y/2"), ("X", "X")]
 
-# 1-qubit
-qst_basis_mat(tomo_us, 'tomo')
-qst_basis_mat(octomo_us, 'octomo')
-qst_basis_mat(nonetomo_us, 'nonetomo')
-qst_basis_mat(pm_octomo_us, 'pm_octomo')
-qst_basis_mat(pm_full_us, 'pm_full')
-# 2-qubit
-qst_basis_mat(qmath.tensor_combinations(tomo_us, 2), 'tomo_2qubits')
-qst_basis_mat(qmath.tensor_combinations(octomo_us, 2), 'octomo_2qubits')
-# 3-qubit
-qst_basis_mat(qmath.tensor_combinations(tomo_us, 3), 'tomo_3qubits')
-qst_basis_mat(qmath.tensor_combinations(octomo_us, 3), 'octomo_3qubits')
-# 4-qubit
-# qst_basis_mat(qmath.tensor_combinations(tomo_us, 4), 'tomo_4qubits')
-# qst_basis_mat(qmath.tensor_combinations(octomo_us, 4), 'octomo_4qubits')
+# octomo3_ops = [("I", "I"), ("X/2", "I"), ("Y/2", "I"), ("-X/2", "I"),
+#                ("-Y/2", "I"), ("X/2", "X"), ("Y/2", "X"), ("-X/2", "X"),
+#                ("-Y/2", "X"), ("X", "I"), ("I", "X/2"), ("I", "Y/2"),
+#                ("I", "-X/2"), ("I", "-Y/2"), ("I", "X"), ("X", "X/2"),
+#                ("X", "Y/2"), ("X", "-X/2"), ("X", "-Y/2"), ("X", "X")]
 
-# Qutrit(3-level) tomo
+# tomo3_us = gen_tomo3_us(tomo3_ops)
+# qst_basis_mat(tomo3_us, 'tomo3lvl')
 
-tomo3_ops = [("I", "I"), ("X/2", "I"), ("Y/2", "I"), ("X", "I"), ("I", "X/2"),
-             ("I", "Y/2"), ("X", "X/2"), ("X", "Y/2"), ("X", "X")]
-
-octomo3_ops = [("I", "I"), ("X/2", "I"), ("Y/2", "I"), ("-X/2", "I"),
-               ("-Y/2", "I"), ("X/2", "X"), ("Y/2", "X"), ("-X/2", "X"),
-               ("-Y/2", "X"), ("X", "I"), ("I", "X/2"), ("I", "Y/2"),
-               ("I", "-X/2"), ("I", "-Y/2"), ("I", "X"), ("X", "X/2"),
-               ("X", "Y/2"), ("X", "-X/2"), ("X", "-Y/2"), ("X", "X")]
-
-tomo3_us = gen_tomo3_us(tomo3_ops)
-qst_basis_mat(tomo3_us, 'tomo3lvl')
-
-octomo3_us = gen_tomo3_us(octomo3_ops)
-qst_basis_mat(octomo3_us, 'octomo3lvl')
+# octomo3_us = gen_tomo3_us(octomo3_ops)
+# qst_basis_mat(octomo3_us, 'octomo3lvl')
 
 ############################
 # quantum state tomography #
@@ -327,7 +319,6 @@ def test_qst(n=256):
     Generate a bunch of random states, and check that we recover them
     from state tomography
     """
-
     def random_rho_1qubit():
         theta = np.random.uniform(0, np.pi)
         phi = np.random.uniform(0, 2 * np.pi)

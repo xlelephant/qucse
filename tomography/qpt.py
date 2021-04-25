@@ -45,8 +45,6 @@ from ..qmath import (sigma_i, sigma_x, sigma_y, sigma_z, sigma_P, sigma_M,
                      expander, super2mat, mat2vec, vec2mat, dot3, rotate,
                      tensor_combinations, square_matrix_dim, tensor, CPLX_TYPE)
 
-PMs = qops.PM_DICT.keys()[:9]  # the projectives for QST
-
 CPLX_DTYPE = CPLX_TYPE
 
 ##############################
@@ -56,9 +54,8 @@ CPLX_DTYPE = CPLX_TYPE
 
 def default_basis(rho_in):
     basis = 'pauli-vector'
-    if square_matrix_dim(rhos_in[0]) != 2:
-        basis += '_{}qubits'.format(int(np.log2(square_matrix_dim(
-            rhos_in[0]))))
+    if square_matrix_dim(rho_in) != 2:
+        basis += '_{}qubits'.format(int(np.log2(square_matrix_dim(rho_in))))
     return basis
 
 
@@ -123,7 +120,8 @@ def qpt_basis_mat(As, key=None):
     # Note: this is different from chi_basis_mat(As)
     # TODO: unify qpt basis in this file and that in qmath
     T = np.array([
-        mat2vec(super2mat(A_j, A_k.conj().T, left_dot=False)).flatten()
+        mat2vec(super2mat(A_j,
+                          A_k.conj().T, left_dot=False)).flatten()
         for A_j in As for A_k in As
     ]).T
     # transpose here is for right dot with ρ, where jk is the last index
@@ -143,8 +141,7 @@ def chi_mat(chi_pointer, T, return_all=False):
         T = _QPT_TRANSFORMS[T][1]
 
     _, dim_o = chi_pointer.shape
-    chi_vec, resids, rank, s = np.linalg.lstsq(T,
-                                               chi_pointer.flatten(),
+    chi_vec, resids, rank, s = np.linalg.lstsq(T, chi_pointer.flatten(),
                                                rcond=-1)
     chi = vec2mat(chi_vec)
 
@@ -167,12 +164,13 @@ def qpt(rhos_in, rhos_out, T=None, return_all=False):
     """
     rhos_in = np.array(rhos_in)
     rhos_out = np.array(rhos_out)
-    T = default_basis(rhos_in) if T is None else T
+    T = default_basis(rhos_in[0]) if T is None else T
     chi_pointer = chi_pointer_mat(rhos_in, rhos_out)
     return chi_mat(chi_pointer, T, return_all)
 
 
-def gen_ideal_chi_matrix(U, As, rho0=None, qpt_basis=None, zero_th=0):
+def gen_ideal_chi_matrix(U, As, rho0=None, zero_th=0, qpt_basis=None,
+                         return_states=False):
     """Generate the ideal χ matrix from the input unitary operator U
 
     Args:
@@ -206,7 +204,7 @@ def gen_ideal_chi_matrix(U, As, rho0=None, qpt_basis=None, zero_th=0):
             rho_shape = 2 * [S_dim, E_dim]
             in_rho = np.reshape(rho_s_e, rho_shape).trace(axis1=1, axis2=3)
             if (abs(in_rho) < zero_th).all():
-                print('tr(ρA)=tr(ρ{}) is small for QPT, discard!'.format(op_A))
+                print('tr(ρA)=tr(ρ{}) is small for QPT, discard!'.format(A))
                 continue
             rho_s_e = U @ rho_s_e @ U.conjugate().transpose()
             out_rho = np.reshape(rho_s_e, rho_shape).trace(axis1=1, axis2=3)
@@ -214,8 +212,10 @@ def gen_ideal_chi_matrix(U, As, rho0=None, qpt_basis=None, zero_th=0):
         rhos_o.append(out_rho)
 
     chi = qpt(rhos_i, rhos_o, qpt_basis)
-
-    return chi, rhos_i, rhos_o
+    if return_states:
+        return chi, rhos_i, rhos_o
+    else:
+        return chi
 
 
 def cal_process_rho(rho, chi, qpt_basis=None):

@@ -37,9 +37,15 @@ UCS_DICT = {}
 
 
 def tomo_dagger(tomo_op):
-    """the dagger of OP is -OP"""
+    """
+    the dagger of OP is -OP
+    the dagger of OP+ is OP-"""
     if tomo_op[0] == '-':
         return tomo_op[1:]
+    if tomo_op[-1] == '-':
+        return tomo_op[:-1] + '+'
+    if tomo_op[-1] == '+':
+        return tomo_op[:-1] + '-'
     else:
         return '-' + tomo_op
 
@@ -128,7 +134,6 @@ PM_DICT = {
     "Pzx-": 0.5 * (I - SQRT05 * (-X + Z)),
     "Pzy-": 0.5 * (I - SQRT05 * (-Y + Z)),
 }  # [1]
-
 ## verify the correctness:
 # for key in PM_DICT.keys():
 #     u1_op = STATE_AXIS_OP_DICT[key[1:]]
@@ -137,14 +142,6 @@ PM_DICT = {
 #     print(P)
 #     assert np.allclose(P, get_op(key))
 
-# casual break
-# ptf.ref[4] III
-# ptf.ref[5] V.A
-# Chose the full basis: {Pz+, Px+, Px-, Py+}
-CB_FULL_BASIS = ["Pz+", "Px+", "Px-", "Py+"]
-PM_OCTOMO_BASIS = ["Pz+", "Pz-", "Px+", "Px-", "Py+", "Py-"]
-PM_FULL_BASIS = list(PM_DICT.keys()[:9])
-PM_SMTC_BASIS = list(PM_DICT.keys())
 
 def cb_to_mfb_op(pms):
     """P⊗∏ => qmath.super2mat(U_p ⊙ Pz+ ⊙ U_∏)"""
@@ -168,9 +165,14 @@ def cb_to_lmat(pms):
     return AA_c.reshape(2, 2, 2, 2).transpose(0, 2, 1, 3).reshape(4, 4)
 
 
+# casual break
 # Meas & Projections
+# ptf.ref[4] III
+# ptf.ref[5] V.A
+CB_FULL_BASIS = ["Pz+", "Px+", "Px-", "Py+"]
+CB_OCTOMO_BASIS = ["Pz+", "Pz-", "Px+", "Px-", "Py+", "Py-"]
 CB_FULL_OPS = [ops for ops in itertools.product(CB_FULL_BASIS, repeat=2)]
-CB_SMTC_OPS = [ops for ops in itertools.product(PM_OCTOMO_BASIS, repeat=2)]
+CB_SMTC_OPS = [ops for ops in itertools.product(CB_OCTOMO_BASIS, repeat=2)]
 CB_FULL_DICT = dict([('.'.join(op), cb_to_u(op)) for op in CB_FULL_OPS])
 CB_SMTC_DICT = dict([('.'.join(op), cb_to_u(op)) for op in CB_SMTC_OPS])
 # OP_CB_LMAT_DICT = dict([('.'.join(op), cb_to_lmat(op)) for op in CB_OPS])
@@ -270,8 +272,3 @@ def get_init_rho(op, rho0=None):
     dim = square_matrix_dim(u)
     rho0 = np.diag([1.0] + (dim - 1) * [0]) if rho0 is None else rho0
     return dot3(u, rho0, u.conjugate().transpose())
-
-
-def get_init_rhos(ops, rho0=None):
-    """Return the initial rhos prepared by the ops"""
-    return [get_init_rho(op, rho0) for op in ops]

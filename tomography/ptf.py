@@ -34,7 +34,17 @@ from . import qst, qpt
 from .. import qmath, qops
 
 ZERO_RHO_TH = 1E-6
-PMs = qops.PM_DICT.keys()[:9]  # the projectives for QST
+
+QST_BASIS = 'tomo'
+QST_PMs = ['Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+']
+# should be more than enough for QST!
+# QST_BASIS = 'smtc_tomo'
+# QST_PMs = [
+#     'Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+', 'Pyx+', 'Pyx-', 'Pxy-', 'Pxy+',
+#     'Pxz+', 'Pxz-', 'Pyz+', 'Pyz-', 'Pzx+', 'Pzx-', 'Pzy+', 'Pzy-'
+# ]
+
+QPT_PMs = qst.tomo_basis_ops['pm_full']
 
 
 def basis_ops(group='uc', steps=1, complement=False):
@@ -66,6 +76,26 @@ def basis_ops(group='uc', steps=1, complement=False):
         return [n for n in itertools.product(op_set, repeat=steps)]
 
 
+def least_square_fit(Bss, rhos, return_all=False, disp=False):
+    D_S = int(np.size(Bss[0][0])**0.5)
+    rho_vec = np.reshape(rhos, (len(rhos), -1))
+    As_vec = []
+    for As in Bss:
+        As = qops.get_ops(As)
+        AsAs = qmath.tensor([qmath.super2mat(A) for A in As[::-1]])
+        As_vec.append(AsAs.reshape(-1))
+    M, resids, rank, s = np.linalg.lstsq(As_vec, rho_vec, rcond=None)
+
+    if disp:
+        print('\nresids is: ', resids, '\nrank is: ', rank, '\ns is: ', s)
+        dim = int(np.size(M)**0.5)
+        print('M is \n', M.reshape(dim, dim))
+    if return_all:
+        return M, resids, rank, s
+    else:
+        return M
+
+
 class ProcessTensor(object):
     """full process tensor"""
     def __init__(self, T_choi=None, T_mat=None):
@@ -77,9 +107,11 @@ class ProcessTensor(object):
         if self.T_choi is not None:
             step_els = self.steps_of_tensor(T_choi)
             self.N = step_els
-        if self.T_mat is not None:
+        elif self.T_mat is not None:
             step_els = self.steps_of_tensor(T_mat)
             self.N = step_els
+        else:
+            self.N = None
 
     @staticmethod
     def choi_order(step_els, reverse=False):
@@ -136,11 +168,11 @@ class ProcessTensor(object):
         D_S, D_E = self.D_S, self.D_E
         return int(np.log2(np.size(T) - D_S * D_S) / np.log2(D_S**4))
 
-    def trace_env(rho):
+    def trace_env(self, rho):
         return rho.reshape(self.D_S, self.D_E, self.D_S,
                            self.D_E).trace(axis1=1, axis2=3)
 
-    def A_to_AA(A):
+    def A_to_AA(self, A):
         """convert local operation (Bilinear) to LeftMatrix form"""
         if not isinstance(A, np.ndarray):
             A = qops.get_op(A)
@@ -173,29 +205,11 @@ class ProcessTensor(object):
             rhos: the output density matrix
         """
         if self.N is None:
-            self.N = len(As)
+            self.N = len(Bss[0])
         else:
-            assert self.N == len(As), "number of steps dismatch!"
-        rho_vec = np.reshape(rhos, (len(rhos), -1))
-        As_vec = []
-        for As in Bss:
-            As = qops.get_ops(As)
-            AsAs = qmath.tensor([qmath.super2mat(A) for A in As[::-1]])
-            As_vec.append(AsAs.reshape(-1))
-        M, resids, rank, s = np.linalg.lstsq(As_vec, rho_vec, rcond=None)
-        if np.size(As[0]) != self.D_S**2:
-            print("Warning: overwrite the dimension of sysytem based on As!")
-        self.D_E = self.D_S = int(np.size(As[0])**0.5)
-        self.T_mat = M
-
-        if disp:
-            print('\nresids is: ', resids, '\nrank is: ', rank, '\ns is: ', s)
-            dim = int(np.size(M)**0.5)
-            print('M is \n', M.reshape(dim, dim))
-        if return_all:
-            return M, resids, rank, s
-        else:
-            return M
+            assert self.N == len(Bss), "number of steps dismatch!"
+        self.T_mat = least_square_fit(Bss, rhos, return_all=False, disp=False)
+        return self.T_mat
 
     def cal(self, rho_se, Us, return_format='choi'):
         """The U of us has the index:
@@ -238,50 +252,58 @@ class ProcessTensor(object):
         self.T_choi = np.einsum(T_se_tensor, trace_eg_idx)
         if return_format == 'choi':
             return self.T_choi
-        else:
+        elif return_format == 'matrix':
             self.T_mat = self.choi_to_matrix(self.T_choi)
             return self.T_mat
+        else:
+            raise KeyError
 
-    def _simulate_process(self, rho0, As, Us):
+    def rhose_out_ideal(self, rho0, As, Us):
         """Simulate the dynamics in the process tensor framework"""
         rho_se = rho0
+        D_S, D_E = self.D_S, self.D_E
         for A, U in zip(As, Us):
-            A = tomo.get_op(A)
-            U = tomo.get_op(U) if isinstance(U, str) else U
-            A_se = qmath.tensor((A, self.D_E))
+            A = qops.get_op(A) if isinstance(A, (str, tuple)) else A
+            U = qops.get_op(U) if isinstance(U, str) else U
+            A_se = qmath.tensor((A, qmath.sigma_I(self.D_E)))
             rho_se = A_se @ rho_se @ A_se.conjugate().transpose()
             rho_se = U @ rho_se @ U.conjugate().transpose()
         return rho_se
 
-    def sim(self, rho_se, Bss, Us, return_all=False, disp=True):
+    def sim(self, rho0, Bss, Us, return_format='matrix'):
         """Simulate the closed two-qubit evolution process and fit the
         process tensor of 1-qubit open quantum evolution"""
         assert len(Bss[0]) == len(Us), '# Ctrl Ops should be paired with U_se'
+        D_S, D_E = self.D_S, self.D_E
         rhos = []
         for As in Bss:
-            rho_se = self._simulate_process(rho_se, As, Us)
+            rho_se = self.rhose_out_ideal(rho0, As, Us)
             rho_se = np.reshape(rho_se, (D_S, D_E, D_S, D_E))
             rho_m = np.trace(rho_se, axis1=1, axis2=3)
             rhos.append(rho_m)
-        return ptf.ProcessTensor().fit(Bss,
-                                       rhos,
-                                       return_all=return_all,
-                                       disp=disp)
+        T_mat = self.fit(Bss, rhos, return_all=False, disp=False)
+        if return_format == 'matrix':
+            self.T_mat = T_mat
+            return self.T_mat
+        elif return_format == 'choi':
+            self.T_choi = self.matrix_to_choi(T_mat)
+            return self.T_choi
+        else:
+            raise KeyError
 
-    def qmap_prod_tensor(rho0, Chis):
+    def qmap_prod_tensor(self, rho0, Chis):
         """Convert the quantum process to process tensor (Markovian)"""
         num_steps = len(Chis)
         Bss_ops = basis_ops(basis, num_steps, complement=False)
         rhos_out = []
         for Bss_op in Bss_ops:
-            rhos_out.append(
-                self.reconstruct(Bss_op, Chis, rho0, method='pqmaps'))
-        M, resids, rank, s = ptm(Bss_ops, rhos_out, disp=False)
+            rhos_out.append(self.reconstruct(Bss_op, Chis, rho0, method='chi'))
+        M, resids, rank, s = self.fit(Bss_ops, rhos_out, disp=False)
         self.T_choi_prod = self.matrix_to_choi(M)
         return self.T_choi_prod
 
-    def reconstruct(As, T=None, rho_in=None, method='matrix'):
-        """method could be matrix or choi or pqmaps"""
+    def reconstruct(self, As, T=None, rho_in=None, method='matrix'):
+        """method could be matrix or choi or chi"""
         D_S, _ = self.D_S, self.D_E
         if method == 'matrix':
             T = self.T_mat if T is None else T
@@ -299,14 +321,15 @@ class ProcessTensor(object):
             A_sum_idx[2 * self.N + 1] = 0
             rho_m = np.einsum(T, T_sum_idx, As_choi, A_sum_idx)
 
-        elif method == 'pqmaps':
+        elif method == 'chi':
             Chis = self.Chis if T is None else T
-            chi_dim = qmath.square_matrix_dim(self.Chis[0])
+            chi_dim = qmath.square_matrix_dim(Chis[0])
             if chi_dim == D_S**2:
                 rho_dim = qmath.square_matrix_dim(rho_in)
                 rho_in = self.trace_env(rho_in) if rho_dim != D_S else rho_in
                 for A, Chi in zip(As, Chis):
-                    if qmath.square_matrix_dim(A) == D_S**2:
+                    if (isinstance(A, np.ndarray)
+                            and qmath.square_matrix_dim(A) == D_S**2):
                         A_chi = A
                         rho_in = qpt.cal_process_rho(rho_in, A_chi)
                     else:
@@ -318,7 +341,8 @@ class ProcessTensor(object):
             elif chi_dim == (D_S * D_E)**2:
                 rho_in = rho0
                 for A, Chi in zip(As, Chis):
-                    if qmath.square_matrix_dim(A) == D_S**2:
+                    if (isinstance(A, np.ndarray)
+                            and qmath.square_matrix_dim(A) == D_S**2):
                         rho_in = qpt.cal_process_rhose(rho_in, A, QPT_BASIS)
                     else:
                         A = qops.get_op(A)
@@ -345,31 +369,32 @@ class ProcessTensor(object):
         T_choi = self.T_choi if T_choi is None else T_choi
         D_S, _ = self.D_S, self.D_E
         step_els = self.steps_of_tensor(T_choi)
-        M_tensor = np.transpose(T_choi, self.choi_order(step_els,
-                                                        reverse=True))
+        M_tensor = np.transpose(T_choi,
+                                self.choi_order(step_els, reverse=True))
         return np.reshape(M_tensor, ((D_S**4)**step_els, D_S**2))
 
-    def _lam_to_chi(self, T_choi):
+    def lam_to_chi(self):
         """Convert the process tensor to Chi Matrix, using op=PMs
         If the output is not as predicted by the linear map (QPT), then the
         process is bilinear, indicating the exsitence of SE correlation. [6]
         """
         rhos_in = []
         rhos_out = []
-        for pm_op in qops.PM_FULL_BASIS:
+        for pm_op in QPT_PMs:
             pm = qops.get_op(pm_op)
-            rho_m = self.reconstruct([pm], T_choi, method='choi')
+            rho_m = self.reconstruct([pm], method='choi')
             # see the normalize factor Γ_n - [4](III) [5](Appendix.B)
             # rho_m = qmath.unit_trace(rho_m)  # rho_out should be normalized too
             if (abs(rho_m) < ZERO_RHO_TH).all():
                 print('Prob of As {} is small for QPT, discard!'.format(pm_op))
                 continue
-            rho_m = rho_m / np.trace(rho_m)  # / 1.0
-            rhos_in.append(pm)  # * np.trace(rho_m) same as the left
+            # rho_m = rho_m / np.trace(rho_m)  # / 1.0
+            # subtle difference here in QPT!
+            rhos_in.append(pm * np.trace(rho_m))
             rhos_out.append(rho_m)
         return qpt.qpt(rhos_in, rhos_out)
 
-    def choi_to_qmaps(self):
+    def choi_to_qmaps(self, T_choi=None):
         """𝚼(choi state of T) = (⨂_1~k Λ_k:k-1)⊗ρ0"""
         A_s_rho0 = ['I'] * self.N
         self.rho0 = self.trace(A_s_rho0, out_idx=0)
@@ -378,9 +403,9 @@ class ProcessTensor(object):
         for i in range(self.N):
             A_s_lam = ['I'] * self.N
             A_s_lam[i] = None
-            T_lam = self.trace(A_s_lam, out_idx=i + 1)
+            T_lam = self.trace(A_s_lam, T_choi, out_idx=i + 1)
             Lambdas.append(T_lam)
-            Chis.append(self._lam_to_chi(T_lam))
+            Chis.append(self.lam_to_chi(T_lam))
         self.Chis = Chis
         self.Lambdas = Lambdas
         return self.rho0, self.Chis, self.Lambdas
@@ -418,17 +443,14 @@ class ProcessTensor(object):
         out_idx = ((step_els + 1) + out_idx) % (step_els + 1)
         A_o_step = out_idx
         for i in range(step_els):
-            A = qops.get_op(As[i]) if not isinstance(As[i], np.ndarray) else A
-            if A is None:
+            if As[i] is None:
                 assert out_idx > i, "Output must go beyond the contracted tensor!"
                 A_o_step -= 1
                 continue
-            elif isinstance(A, np.ndarray):
-                # (Λ⊗𝟙)[Ψ+] is just the choi-ordered AA
-                AA = qmath.super2mat(A)
-                trace_els += 1
             else:
-                raise ValueError("{} is not supported!".format(A))
+                # (Λ⊗𝟙)[Ψ+] is just the choi-ordered AA
+                AA = self.A_to_AA(As[i])
+                trace_els += 1
             AsAs = qmath.tensor((AA, AsAs))
             A_sum_ix.insert(0, 2 * (step_els - i))
             A_sum_ix.insert(0, 2 * (step_els - i) - 1)
@@ -528,58 +550,54 @@ class PTensorPM(ProcessTensor):
 
         TRACE_IM_MAX = 1E-6
         out_step_mrk = np.array([1 if A is None else 0 for A in As])
-        out_step_els = sum(out_step_mrk)
+        traced_steps = sum(out_step_mrk)
         out_idx = ((step_els + 1) + out_idx) % (step_els + 1)
+
+        def get_init_steps(As):
+            int_steps = []
+            for i, A in enumerate(As):
+                if A != 'pms' and np.allclose(qops.get_op(A), np.eye(D_S)):
+                    int_steps.append(i)
+            return int_steps
+
         # return a intermediate state
-        if not out_step_els:
-            A_s = list(As)
+        if not traced_steps:
             # return the final step, this should be the same as trace_tensor()
             if out_idx == step_els:
-                int_steps = []
-                int_els = 0
-                for i, A in enumerate(A_s):
-                    if np.allclose(qops.get_op(A), np.eye(D_S)):
-                        int_steps.append(i)
-                        int_els += 1
-                ints_pms = list(itertools.product(int_ops, repeat=int_els))
+                A_s = list(As)  # this is fully refreshed in every loop
+                int_idx = get_init_steps(A_s)
+                int_pms = list(itertools.product(int_ops, repeat=len(int_idx)))
                 rho_avg = 0
-                for pms in ints_pms:
-                    for i, pm in zip(int_steps, pms):
+                for pms in int_pms:
+                    for i, pm in zip(int_idx, pms):
                         A_s[i] = pm
-                    As_choi = self.As_to_choi(A_s)
-                    rho_avg += self.reconstruct(As_choi, T_choi, method='choi')
+                    r_p = self.reconstruct(A_s, T_choi, method='choi')
+                    rho_avg += r_p
             # return the intermediate state
             else:
-                Bss_ops = ['Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+']
-                qst_basis = 'tomo'
+                A_s = list(As)  # this is fully refreshed in every loop
+                A_s[out_idx] = 'pms'
+                int_idx = get_init_steps(A_s)
+                int_pms = list(itertools.product(int_ops, repeat=len(int_idx)))
                 B_probs = []
-                int_steps = []
-                int_els = 0
-                A_s[out_idx] = 'pm_x'  # set op_A in out_idx to qst basis
-                for i, A in enumerate(A_s):
-                    if np.allclose(qops.get_op(A), np.eye(D_S)):
-                        int_steps.append(i)
-                        int_els += 1
-                ints_pms = list(itertools.product(int_ops, repeat=int_els))
-                for Bss_op in Bss_ops:
+                for qst_pm in QST_PMs:
                     p_k_int = 0
-                    for pms in ints_pms:
-                        for i, pm in zip(int_steps, pms):
+                    for pms in int_pms:  # sum over different pms
+                        for i, pm in zip(int_idx, pms):
                             A_s[i] = pm
-                        A_s[out_idx] = Bss_op
-                        As_choi = self.As_to_choi(A_s)
-                        rho_int_k = self.reconstruct(As_choi,
-                                                     T_choi,
-                                                     method='choi')
-                        p_k_int += np.trace(rho_int_k)
+                        A_s[out_idx] = qst_pm
+                        r_p = self.reconstruct(A_s, T_choi, method='choi')
+                        p_k_int += np.trace(r_p)
                     assert p_k_int.imag < TRACE_IM_MAX
+                    assert abs(p_k_int) <= 1.0 + 1E-10, 'P={}'.format(p_k_int)
                     B_probs.append(p_k_int)
-                rho_avg = qst.qst(np.array(B_probs).reshape(3, 2), qst_basis)
+                rho_avg = qst.qst(
+                    np.array(B_probs).reshape(len(QST_PMs) // 2, 2), QST_BASIS)
             return rho_avg
         else:
             # return a contracted process tensor
             # loop over fit basis (B_k:j)
-            Bss_ops = basis_ops('pm', out_step_els, complement=False)
+            Bss_ops = basis_ops('pm', traced_steps, complement=False)
             rhos_out = []
             for Bss_op in Bss_ops:
                 A_s = [A for A in As]
@@ -593,7 +611,7 @@ class PTensorPM(ProcessTensor):
                 rho_k = self.trace(A_s, T_choi, out_idx=out_idx)
                 rhos_out.append(rho_k)
             # tomography.plotTrajectory(rhos_out)
-            M, resids, rank, s = self.fit(Bss_ops, rhos_out, disp=False)
+            M = least_square_fit(Bss_ops, rhos_out)
             T_choi = self.matrix_to_choi(M)
             return T_choi
 
