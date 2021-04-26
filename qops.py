@@ -247,12 +247,12 @@ def get_op(op):
             ])
         else:
             raise KeyError("{} is not defined".format(op))
-    elif len(op) == 3 and isinstance(op[0], (int, float)):
-        # rotate along arbitrary rotvec (axis, angle)
-        return rotvec2su(rotvec=op)
     elif len(op) == 2 and isinstance(op[0], (int, float)):
-        # rotate along axis in the xy plane (theta, axis)
+        # project to state (theta, phi)
         return polar2pm(theta=op[0], phi=op[1])
+    elif len(op) == 3 and isinstance(op[0], (int, float)):
+        # rotate along arbitrary axis in the bloch sphere (x, y, z)
+        return rotvec2su(rotvec=op)
     elif len(np.shape(op)) >= 1:
         return tensor([get_op(p) for p in op])
     elif op is None:
