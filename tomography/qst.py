@@ -76,7 +76,7 @@ def qst_basis_mat(Us, key=None):
     return Um
 
 
-tomo_basis_ops = {
+TOMO_BASIS_OPS = {
     'tomo': ['I', 'X/2', 'Y/2'],
     # QST_PMs = ['Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+']
     'octomo': ['I', 'X/2', 'Y/2', '-X/2', '-Y/2', 'X'],
@@ -91,7 +91,7 @@ tomo_basis_ops = {
     'pm_full': list(qops.PM_DICT.keys())[:9],
     'pm_smtc': list(qops.PM_DICT.keys())
 }
-for k, v in tomo_basis_ops.items():
+for k, v in TOMO_BASIS_OPS.items():
     # 1-qubit
     qst_basis_mat(qops.get_ops(v), k)
     # 2-qubit

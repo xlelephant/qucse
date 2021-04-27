@@ -84,9 +84,10 @@ def unit_trace(A, flat_threshold=1e-5, noisy=True):
     n = square_matrix_dim(A)
     trace_A = np.trace(A)
     if abs(trace_A) < flat_threshold:
-        print("Warning: tr(A)={}, set A to zeros".format(trace_A))
-        # raise ValueError
+        if noisy:
+            print("Warning: tr(A)={}, set A to zeros".format(trace_A))
         return np.zeros_like(A)
+        # raise ValueError
     else:
         return A / trace_A
 
@@ -100,17 +101,19 @@ def unimodularize(A, d=1):
     return d / np.linalg.det(A)**(1.0 / n) * A
 
 
-def fidelity_rho(rho_in, rho_ideal, normalize=True, imag_atol=1e-6):
+def fidelity_rho(rho_in, rho_ideal, normalize=True, imag_atol=1e-6,
+                 noisy=True):
     """https://www.quantiki.org/wiki/fidelity"""
     if normalize:
-        rho_in = unit_trace(rho_in)
-        rho_ideal = unit_trace(rho_ideal)
+        rho_in = unit_trace(rho_in, noisy=noisy)
+        rho_ideal = unit_trace(rho_ideal, noisy=noisy)
     sqrt_rho_ideal = sqrtm(rho_ideal)
     fid = np.trace(sqrtm(dot3(sqrt_rho_ideal, rho_in, sqrt_rho_ideal)))
     assert abs(fid.imag) < imag_atol, 'max imag = {}'.format(abs(fid.imag))
     # fid = fid / np.trace(rho_ideal)
     if fid.real > 1.0:
-        print("WARNING fid {} > 1.0 and set to 1.0!".format(fid))
+        if noisy and fid.real > 1 + imag_atol:
+            print("WARNING fid-1 = {} > 0 and set to 1.0!".format(fid - 1))
         fid = 1.0
     return abs(fid.real)**2
 
@@ -129,7 +132,9 @@ def relative_entropy(rho_a, rho_b):
     Rev. Mod. Phys. 74, 197 (2002).
     Section II.E
     """
-    assert square_matrix_dim(rho_a) == square_matrix_dim(rho_b)
+    dim_a = square_matrix_dim(rho_a)
+    dim_b = square_matrix_dim(rho_b)
+    assert dim_a == dim_b, '{}!={}'.format(dim_a, dim_b)
     # return np.trace(np.dot(rho_a, (logm(rho_a) - logm(rho_b))))
     return (np.trace(np.dot(rho_a, logm(rho_a))) -
             np.trace(np.dot(rho_a, logm(rho_b))))
@@ -537,8 +542,7 @@ def blochs2rho(xyzs):
         [np.kron(sigma_i, np.ones(m)).reshape(2, 2, m).transpose(2, 0, 1)] + [
             np.kron(sigma, k).reshape(2, 2, m).transpose(2, 0, 1)
             for k, sigma in zip(xyzs, sigmas)
-        ],
-        axis=0)
+        ], axis=0)
 
 
 def bloch2polar(xyz):
@@ -561,8 +565,7 @@ def polar2ket(theta, phi):
     # mag = 1.0
     return np.array(
         [np.cos(0.5 * theta),
-         np.sin(0.5 * theta) * np.exp(1j * phi)],
-        dtype=DTYPE)
+         np.sin(0.5 * theta) * np.exp(1j * phi)], dtype=DTYPE)
 
 
 def polar2rho(theta, phi, mag=1.0):

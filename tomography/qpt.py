@@ -170,7 +170,7 @@ def qpt(rhos_in, rhos_out, T=None, return_all=False):
 
 
 def gen_ideal_chi_matrix(U, As, rho0=None, zero_th=0, qpt_basis=None,
-                         return_states=False):
+                         return_states=False, noisy=True):
     """Generate the ideal χ matrix from the input unitary operator U
 
     Args:
@@ -187,13 +187,13 @@ def gen_ideal_chi_matrix(U, As, rho0=None, zero_th=0, qpt_basis=None,
     rho0 = np.diag([1] + (len(U) - 1) * [0]) if rho0 is None else rho0
     U_dim = len(U)
 
-    As = qops.get_ops(As)
-    S_dim = len(As[0])
+    S_dim = len(qops.get_op(As[0]))
     E_dim = U_dim // S_dim
 
     rhos_i, rhos_o = [], []
 
-    for A in As:
+    for A_op in As:
+        A = qops.get_op(A_op) if isinstance(A_op, (str, tuple)) else A_op
         if S_dim == U_dim:
             in_rho = qmath.dot3(A, rho0, A.conj().T)
             out_rho = qmath.dot3(U, in_rho, U.conj().T)
@@ -203,8 +203,8 @@ def gen_ideal_chi_matrix(U, As, rho0=None, zero_th=0, qpt_basis=None,
             rho_s_e = A_se @ rho0 @ A_se.conjugate().transpose()
             rho_shape = 2 * [S_dim, E_dim]
             in_rho = np.reshape(rho_s_e, rho_shape).trace(axis1=1, axis2=3)
-            if (abs(in_rho) < zero_th).all():
-                print('tr(ρA)=tr(ρ{}) is small for QPT, discard!'.format(A))
+            if (abs(in_rho) < zero_th).all() and noisy:
+                print('tr(ρA)=tr(ρ{}) is small for QPT, discard!'.format(A_op))
                 continue
             rho_s_e = U @ rho_s_e @ U.conjugate().transpose()
             out_rho = np.reshape(rho_s_e, rho_shape).trace(axis1=1, axis2=3)
@@ -226,6 +226,7 @@ def cal_process_rho(rho, chi, qpt_basis=None):
 
 
 def cal_process_rhose(rhose, chi, qpt_basis=None):
+    """evolute S and E assuming the Identity map on E"""
     qpt_basis = default_basis(rhose) if qpt_basis is None else qpt_basis
     As = _QPT_TRANSFORMS[qpt_basis][0]
     return sum(chi[j, k] * dot3(tensor([As[j], sigma_i]), rhose,
