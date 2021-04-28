@@ -11,7 +11,7 @@ Uss_ops = [
     ["CZ", "CNOT", "iSwap"],
     ["CNOT", "CZ", "iSwap"],
 ]
-Uops = Uss_ops[0]
+Uops = Uss_ops[1]
 
 # Test projective measurements
 basis = 'pm'
@@ -41,24 +41,25 @@ PT_fit.T_choi = PT_fit.sim(rho0se, Bss_ops, Us_ops, return_format='choi',
 T_choi_cal_square = qmath.matrixize(PT_cal.T_choi)
 T_choi_fit_square = qmath.matrixize(PT_fit.T_choi)
 
-# Check the eigen value and positive semidefine
-ax = plt.figure().add_subplot()
-vals, vecs = np.linalg.eig(T_choi_cal_square)
-vals = np.array(sorted(vals, key=lambda s: abs(s)))
-ax.plot(vals.real, label='cal_real')
-ax.plot(vals.imag, label='cal_imag')
-vals, vecs = np.linalg.eig(T_choi_fit_square)
-vals = np.array(sorted(vals, key=lambda s: abs(s)))
-ax.plot(vals.real, label='fit_real')
-ax.plot(vals.imag, label='fit_imag')
-plt.legend()
+# # Check the eigen value and positive semidefine
+# ax = plt.figure().add_subplot()
+# vals, vecs = np.linalg.eig(T_choi_cal_square)
+# vals = np.array(sorted(vals, key=lambda s: abs(s)))
+# ax.plot(vals.real, label='cal_real')
+# ax.plot(vals.imag, label='cal_imag')
+# vals, vecs = np.linalg.eig(T_choi_fit_square)
+# vals = np.array(sorted(vals, key=lambda s: abs(s)))
+# ax.plot(vals.real, label='fit_real')
+# ax.plot(vals.imag, label='fit_imag')
+# plt.legend()
+
+Tests_ops = Bss_ops
+process_tensor = ptf.ProcessTensor(T_choi=PT_cal.T_choi)
+PM_ops = ptf.QPT_PMs  # this is for bilinear QPT
+ZERO_RHO_TH = 1E-6
 
 # # ========================== Reconstruction Test ==========================
-# Tests_ops = Bss_ops
 
-# process_tensor = ptf.ProcessTensor(T_choi=PT_cal.T_choi)
-# PM_ops = ptf.QPT_PMs  # this is for bilinear QPT
-# ZERO_RHO_TH = 1E-6
 # Chis = [
 #     qpt.gen_ideal_chi_matrix(U, PM_ops, rho0=rho0se, zero_th=ZERO_RHO_TH)
 #     for U in Us_ops
@@ -145,46 +146,51 @@ plt.legend()
 #         print('average rhos at step {} allclose to \n{}'.format(
 #             out_idx, r_sim))
 
-# # Compare CPTP maps
-# step_index = [1]
-# As_ops = Tests_ops[0]
-# As_ops = ['I', 'I']
-# for idx in [0, 1]:
-#     A_s = As_ops[0:idx]
-#     U_s = Us_ops[0:idx]
-#     rhoi_se = process_tensor.rhose_out_ideal(rho0se, A_s, U_s)
-#     chi_sim = qpt.gen_ideal_chi_matrix(Us_ops[idx], PM_ops, rho0=rhoi_se,
-#                                        zero_th=ZERO_RHO_TH)
-#     A_I_s = process_tensor.N * ['I']
-#     A_I_s[:idx] = As_ops[:idx]
-#     A_I_s[idx] = None
-#     PT_lam_cal = ptf.PTensorPM(T_choi=PT_cal.trace(A_I_s, out_idx=idx + 1))
-#     PT_lam_fit = ptf.PTensorPM(T_choi=PT_fit.trace(A_I_s, out_idx=idx + 1))
-#     chi_cal = PT_lam_cal.lam_to_chi()
-#     chi_fit = PT_lam_fit.lam_to_chi()
+# Compare CPTP maps
+step_index = [1]
+for idx in [0, 1]:
+    As_ops = ['Pyz+', 'I']
+    A_s = As_ops[0:idx]
+    U_s = Us_ops[0:idx]
+    rhoi_se = process_tensor.rhose_out_ideal(rho0se, A_s, U_s)
+    PM_ops = qst.TOMO_BASIS_OPS['pm_octomo']
+    chi_sim = qpt.gen_ideal_chi_matrix(Us_ops[idx], PM_ops, rho0=rhoi_se,
+                                       zero_th=ZERO_RHO_TH)
+    A_I_s = process_tensor.N * ['I']
+    As_ops = ['Pyz+', 'I']
+    A_I_s[:idx] = As_ops[:idx]
+    A_I_s[idx] = None
+    PT_lam_cal = ptf.PTensorPM(T_choi=PT_cal.trace(A_I_s, out_idx=idx + 1))
+    chi_cal = PT_lam_cal.lam_to_chi(pms=qst.TOMO_BASIS_OPS['pm_octomo'])
+    As_ops = ['Pyz+', 'I']
+    A_I_s[:idx] = As_ops[:idx]
+    A_I_s[idx] = None
+    PT_lam_fit = ptf.PTensorPM(T_choi=PT_fit.trace(A_I_s, out_idx=idx + 1))
+    chi_fit = PT_lam_fit.lam_to_chi(pms=qst.TOMO_BASIS_OPS['pm_octomo'])
 
-#     labels = qpt.pauli_vector_ops
-#     title = 'QPT step No. {} of U:{}'.format(idx, Us_ops)
-#     show_sim_chi = True
-#     figsize = (4, 4)
-#     if show_sim_chi:
-#         fig, ax = None, None
-#         fig, ax = show_chi(chi_sim, labels, alpha=0.5, figsize=figsize,
-#                            title=title + '(sim)', fig=fig, ax=ax)
-#     if not np.allclose(chi_sim, chi_cal):
-#         print('\n{}\n{}'.format(chi_sim, chi_cal))
-#         # fig, ax = None, None
-#         fig, ax = show_chi(chi_cal, labels, title=title + '(sim != cal)',
-#                            fig=fig, ax=ax, figsize=figsize)
-#         show_sim_chi = False
-
-#     if not np.allclose(chi_cal, chi_fit):
-#         print('\n{}\n{}'.format(chi_cal, chi_fit))
-#         # fig, ax = None, None
-#         fig, ax = show_chi(chi_fit, labels, title=title + '(cal != fit)',
-#                            fig=fig, ax=ax, figsize=figsize)
-#         show_sim_chi = False
-
+    labels = qpt.pauli_vector_ops
+    pt_name = 'QPT step No. {} of U:{}'.format(idx, Us_ops)
+    show_sim_chi = False
+    figsize = (4, 4)
+    if not np.allclose(chi_sim, chi_cal):
+        print('\n{}\n{}'.format(chi_sim, chi_cal))
+        title = pt_name + '(sim != cal)'
+        fig, ax = None, None
+        fig, ax = show_chi(chi_cal, labels, title=title, fig=fig, ax=ax,
+                           figsize=figsize)
+        show_sim_chi = True
+    if not np.allclose(chi_cal, chi_fit):
+        print('\n{}\n{}'.format(chi_cal, chi_fit))
+        title = pt_name + '(cal != fit)'
+        fig, ax = None, None
+        fig, ax = show_chi(chi_fit, labels, title=title, fig=fig, ax=ax,
+                           figsize=figsize)
+        show_sim_chi = True
+    if show_sim_chi:
+        fig, ax = None, None
+        title = pt_name + '(sim)'
+        fig, ax = show_chi(chi_sim, labels, alpha=0.5, figsize=figsize,
+                           title=title, fig=fig, ax=ax)
 # # Compare qmaps for relative entropy calculation
 # Rho0s_cal, Chis_cal, _ = PT_cal.choi_to_qmaps(T_choi_cal)
 # Rho0s_fit, Chis_fit, _ = PT_fit.choi_to_qmaps(T_choi_fit)
@@ -201,47 +207,47 @@ plt.legend()
 #     else:
 #         print('chis at step {} match.'.format(i))
 
-# ========================= Non-Markovianity Test =========================
-# Trace out the tensor using A0
-A0_thetas = 1 * np.pi * np.linspace(0.01, 1.0, 25, endpoint=False)
-# A0_thetas = 1 * np.pi * np.array([0.25])
-entropies_cal = []
-entropies_fit = []
-for theta in A0_thetas:
-    options = {
-        'ftol': 1E-10,
-        'maxiter': 1000,
-        'method': 'SLSQP',  # SLSQP
-        'real': True
-    }
+# # ========================= Non-Markovianity Test =========================
+# # Trace out the tensor using A0
+# A0_thetas = 1 * np.pi * np.linspace(0.01, 1.0, 25, endpoint=False)
+# # A0_thetas = 1 * np.pi * np.array([0.25])
+# entropies_cal = []
+# entropies_fit = []
+# for theta in A0_thetas:
+#     options = {
+#         'ftol': 1E-10,
+#         'maxiter': 1000,
+#         'method': 'SLSQP',  # SLSQP
+#         'real': True
+#     }
 
-    print("======= theta = {} =======".format(theta / np.pi))
-    A_N_s = PT_cal.N * [None]
-    A_N_s[0] = qmath.rot_xy(theta, 0) if basis == 'cb' else 'X'
-    A_N_s[0] = (theta, 0) if basis == 'pm' else 'X'
+#     print("======= theta = {} =======".format(theta / np.pi))
+#     A_N_s = PT_cal.N * [None]
+#     A_N_s[0] = qmath.rot_xy(theta, 0) if basis == 'cb' else 'X'
+#     A_N_s[0] = (theta, 0) if basis == 'pm' else 'X'
 
-    PT_pm_cal = ptf.PTensorPM(T_choi=PT_cal.T_choi)
-    PT_1p_cal = ptf.PTensorPM(PT_pm_cal.trace(A_N_s))
-    print("cal Markovianity for Cal")
-    entropies_cal.append(PT_1p_cal.non_markovianity())
-    # entropies_cal.append(
-    #     PT_1p_cal.non_markovianity(options=options) / np.cos(theta / 2)**2)
+#     PT_pm_cal = ptf.PTensorPM(T_choi=PT_cal.T_choi)
+#     PT_1p_cal = ptf.PTensorPM(PT_pm_cal.trace(A_N_s))
+#     print("cal Markovianity for Cal")
+#     entropies_cal.append(PT_1p_cal.non_markovianity())
+#     # entropies_cal.append(
+#     #     PT_1p_cal.non_markovianity(options=options) / np.cos(theta / 2)**2)
 
-    print("cal Markovianity for PM")
-    PT_1p_fit = ptf.PTensorPM(T_choi=PT_fit.trace(A_N_s))
-    entropies_fit.append(PT_1p_fit.non_markovianity())
-    # entropies_fit.append(
-    #     PT_1p_fit.non_markovianity(options=options) / np.cos(theta / 2)**2)
+#     print("cal Markovianity for PM")
+#     PT_1p_fit = ptf.PTensorPM(T_choi=PT_fit.trace(A_N_s))
+#     entropies_fit.append(PT_1p_fit.non_markovianity())
+#     # entropies_fit.append(
+#     #     PT_1p_fit.non_markovianity(options=options) / np.cos(theta / 2)**2)
 
-fig = plt.figure()
-ax = fig.add_subplot()
-xs = A0_thetas / np.pi
-ax.plot(xs, np.array(entropies_cal).real, '-', label='N_cal real')
-ax.plot(xs, np.array(entropies_cal).imag, '-.', label='N_cal imag')
-ax.plot(xs, np.array(entropies_fit).real, '--', label='N_fit real')
-ax.plot(xs, np.array(entropies_fit).imag, '-.', label='N_fit imag')
-ax.plot([0.5, 0.5], [0, np.max(entropies_cal)], 'k')
-plt.legend()
+# fig = plt.figure()
+# ax = fig.add_subplot()
+# xs = A0_thetas / np.pi
+# ax.plot(xs, np.array(entropies_cal).real, '-', label='N_cal real')
+# ax.plot(xs, np.array(entropies_cal).imag, '-.', label='N_cal imag')
+# ax.plot(xs, np.array(entropies_fit).real, '--', label='N_fit real')
+# ax.plot(xs, np.array(entropies_fit).imag, '-.', label='N_fit imag')
+# ax.plot([0.5, 0.5], [0, np.max(entropies_cal)], 'k')
+# plt.legend()
 
 plt.show()
 

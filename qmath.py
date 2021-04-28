@@ -135,9 +135,9 @@ def relative_entropy(rho_a, rho_b):
     dim_a = square_matrix_dim(rho_a)
     dim_b = square_matrix_dim(rho_b)
     assert dim_a == dim_b, '{}!={}'.format(dim_a, dim_b)
-    # return np.trace(np.dot(rho_a, (logm(rho_a) - logm(rho_b))))
-    return (np.trace(np.dot(rho_a, logm(rho_a))) -
-            np.trace(np.dot(rho_a, logm(rho_b))))
+    return np.trace(np.dot(rho_a, (logm(rho_a) - logm(rho_b))))
+    # return (np.trace(np.dot(rho_a, logm(rho_a))) -
+    #         np.trace(np.dot(rho_a, logm(rho_b))))
 
 
 # rotation operators

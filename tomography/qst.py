@@ -88,6 +88,7 @@ TOMO_BASIS_OPS = {
     #            'Pyx+', 'Pyx-', 'Pxy-', 'Pxy+', 'Pxz+', 'Pxz-', 'Pyz+', 'Pyz-',
     #            'Pzx+', 'Pzx-', 'Pzy+', 'Pzy-']
     'pm_tomo': ['Pz+', 'Py+', 'Px-'],
+    'pm_octomo': ['Pz+', 'Py+', 'Px-', 'Py-', 'Px+', 'Pz-'],
     'pm_full': list(qops.PM_DICT.keys())[:9],
     'pm_smtc': list(qops.PM_DICT.keys())
 }
