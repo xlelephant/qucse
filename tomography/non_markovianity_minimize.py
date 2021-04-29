@@ -32,7 +32,7 @@ PT_fit.T_choi = PT_fit.sim(rho0se, Bss_ops, Us_ops, return_format='choi')
 
 # ========================= Non-Markovianity Test =========================
 # Trace out the tensor using A0
-A0_thetas = 1 * np.pi * np.linspace(0.01, 1.0, 12, endpoint=False)
+A0_thetas = 1 * np.pi * np.linspace(0.01, 1.0, 7, endpoint=False)
 # A0_thetas = 1 * np.pi * np.array([0.25])
 entropies_cal = []
 entropies_fit = []
@@ -40,8 +40,9 @@ entropies_exp = []
 exp_lsq_err = []
 xs = []
 for theta in A0_thetas[::-1]:
-    xs.append(theta / np.pi)
-    print("======= theta = {} =======".format(theta / np.pi))
+    x_val = theta / np.pi
+    xs.append(x_val)
+    print("===================== theta: {} ====================".format(x_val))
     A_N_s = PT_cal.N * [None]
     A_N_s[0] = qmath.rot_xy(theta, 0) if basis == 'cb' else 'X'
     A_N_s[0] = (theta, 0) if basis == 'pm' else A_N_s[0]
@@ -86,8 +87,8 @@ for theta in A0_thetas[::-1]:
     # new fitting to ps-matrix
     options = {
         'ftol': 1E-8,
-        'maxiter': 200,
-        'method': 'SLSQP',  # SLSQP
+        'maxiter': 100,
+        'method': None,  # SLSQP
         'real': False
     }
     # PT_1p_fit = ptf.PTensorPM(T_choi=PT_fit.contract(A_N_s, options=None))
@@ -95,13 +96,13 @@ for theta in A0_thetas[::-1]:
     PT1f_prod = ptf.ProcessTensor(T_choi=PT_1p_fit.choi_to_product_state())
     print('tr PT fit are: ', PT_1p_fit.trace(), PT1f_prod.trace())
 
-    PT1f_norm = ptf.PTensorPM(PT_1p_fit.normalize(factor=PT1f_prod.trace()))
-    PT1f_prod_norm = ptf.ProcessTensor(T_choi=PT1f_prod.normalize())
-    NM, _ = PT1f_norm.non_markovianity(T_markov=PT1f_prod_norm.T_choi,
-                                       T_guess=PT1f_prod_norm.T_choi,
+    # PT1f_norm = ptf.PTensorPM(PT_1p_fit.normalize(factor=PT1f_prod.trace()))
+    # PT1f_prod_norm = ptf.ProcessTensor(T_choi=PT1f_prod.normalize())
+    NM, _ = PT_1p_fit.non_markovianity(T_markov=PT1f_prod.T_choi,
+                                       T_guess=PT1f_prod.T_choi,
                                        options=options)
 
-    entropies_fit.append(NM)
+    entropies_fit.append(NM / PT1f_prod.trace())
 
     if PT_exp is None:
         continue
@@ -111,13 +112,13 @@ for theta in A0_thetas[::-1]:
     PT1e_prod = ptf.ProcessTensor(T_choi=PT_1p_exp.choi_to_product_state())
     print('tr PT exp are: ', PT_1p_exp.trace(), PT1e_prod.trace())
 
-    PT1e_norm = ptf.PTensorPM(PT_1p_exp.normalize(factor=PT1e_prod.trace()))
-    PT1e_prod_norm = ptf.ProcessTensor(T_choi=PT1e_prod.normalize())
-    NM, lsq_err = PT1e_norm.non_markovianity(T_markov=PT1e_prod_norm.T_choi,
-                                             T_guess=PT1e_prod_norm.T_choi,
+    # PT1e_norm = ptf.PTensorPM(PT_1p_exp.normalize(factor=PT1e_prod.trace()))
+    # PT1e_prod_norm = ptf.ProcessTensor(T_choi=PT1e_prod.normalize())
+    NM, lsq_err = PT_1p_exp.non_markovianity(T_markov=PT1e_prod.T_choi,
+                                             T_guess=PT1e_prod.T_choi,
                                              options=options)
 
-    entropies_exp.append(NM)
+    entropies_exp.append(NM / PT1e_prod.trace())
     exp_lsq_err.append(lsq_err)
 
 ax = plt.figure().add_subplot()

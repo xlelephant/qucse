@@ -795,7 +795,7 @@ class PTensorPM(ProcessTensor):
 
             T_correl = psd.lstsq(err_func, T_correl, unit_trace=False,
                                  real=options['real'], disp=False,
-                                 method='SLSQP', options=options)
+                                 method=options['method'], options=options)
             global tmp_i
             tmp_i = 0
         print('tr of fitted nm PTs are', np.trace(T_correl),
