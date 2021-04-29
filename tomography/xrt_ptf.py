@@ -70,8 +70,8 @@ def get_process_tensor(Bss_ops, rhos, ps=None, herald_th=HRD_TH, noisy=True,
         rho_out = [ps[i] * rhos[i] for i in valid_idx]
         Bss_ops = np.array(Bss_ops)[valid_idx]
     if options is not None:
-        ptensor.least_square_psd_fit(Bss_ops, rho_out, disp=noisy,
+        ptensor.T_mat = ptensor.least_square_psd_fit(Bss_ops, rho_out, disp=noisy,
                                      options=options)
     else:
-        ptensor.least_square_fit(Bss_ops, rho_out, disp=noisy)
+        ptensor.T_mat = ptensor.least_square_fit(Bss_ops, rho_out, disp=noisy)
     return ptensor

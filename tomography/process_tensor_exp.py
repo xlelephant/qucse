@@ -1,3 +1,17 @@
+import labrad
+import numpy as np
+import matplotlib.pyplot as plt
+from qucse.util.registry_editor import load_user_sample
+from qucse.util.labrad_legacy.dataset_wrapper import DataVaultWrapper
+
+from qucse_xl.tomography import qpt, qst, ptf, xrt_ptf
+from qucse_xl import qops, qmath
+
+cxn = labrad.connect()
+Sample = load_user_sample(cxn, 'xiang')
+
+dvw = DataVaultWrapper(Sample)
+
 # FIG 3
 ptf_idx_init = 1368
 ptf_idx_els = 1
@@ -9,7 +23,7 @@ Ass_ops = None
 Us_ops = None
 inits_op = None
 noisy = False
-pt_sel = 1
+pt_sel = 0
 fids_se_qpt = []
 fids_s_qpt = []
 fids_ptf = []
@@ -37,16 +51,10 @@ for idx, d_num in enumerate(pt_set_num):
     psd_options = None
     psd_options = {
         # 'gtol': 1E-6,
-        'ftol': 1E-6,
-        'maxiter': 500,
+        'ftol': 1E-8,
+        'maxiter': 100,
         'method': 'SLSQP',  # SLSQP
-        'real': True
-    }
-    psd_options = {
-        'gtol': 1E-10,
-        'maxiter': 500,
-        'method': None,  # SLSQP
-        'real': True
+        'real': False
     }
     pt_fit = xrt_ptf.get_process_tensor(All_ops, rhos, ps, options=psd_options)
     ptensors_fit.append(pt_fit)
@@ -55,8 +63,11 @@ for idx, d_num in enumerate(pt_set_num):
     rho0_se = qops.get_init_rho(inits_op)
     Us = qops.get_ops(Us_ops)
 
-    pt_cal = ptf.ProcessTensor()
-    pt_cal.cal(rho0_se, Us)
+    PT_cal = ptf.ProcessTensor()
+    PT_cal.T_choi = PT_cal.cal(rho0_se, Us)
+
+    chi_se = [np.array(q0['Chi_' + '*'.join(s)]) for s in Us_ops]
+    chi_ss = [np.array(q0['Chi_TrE_' + '*'.join(s) + '(I*I)']) for s in Us_ops]
 
     # plot
 
@@ -65,7 +76,7 @@ for idx, d_num in enumerate(pt_set_num):
     Bs_sticks, As_sticks = [], []
     for i, As in enumerate(All_ops):
         # ------------------ Predictions using Simulation -----------------
-        rho_ise = pt_cal.rhose_out_ideal(rho0_se, As, Us)
+        rho_ise = PT_cal.rhose_out_ideal(rho0_se, As, Us)
         if (abs(rho_ise) < xrt_ptf.HRD_TH).all():
             if noisy:
                 print('No.{} As {} is too small to be added!'.format(i, As))
@@ -74,7 +85,7 @@ for idx, d_num in enumerate(pt_set_num):
             Bs_sticks.append(As)
         else:
             As_sticks.append(As)
-        rse_sim.append(pt_cal.trace_env(rho_ise))
+        rse_sim.append(PT_cal.trace_env(rho_ise))
 
         # simulate the markovian process of S for reference
         chis_id = [
@@ -82,13 +93,9 @@ for idx, d_num in enumerate(pt_set_num):
                                      rho0=rho0_se, zero_th=ptf.ZERO_RHO_TH,
                                      noisy=False) for U in Us
         ]
-        rss_sim.append(pt_cal.predict(As, chis_id, rho0_se, method='chi'))
+        rss_sim.append(PT_cal.predict(As, chis_id, rho0_se, method='chi'))
 
         # ------- predictions using fitted process map (linear QPT) -------
-        chi_se = [np.array(q0['Chi_' + '*'.join(s)]) for s in Us_ops]
-        chi_ss = [
-            np.array(q0['Chi_TrE_' + '*'.join(s) + '(I*I)']) for s in Us_ops
-        ]
         rse_chi.append(pt_fit.predict(As, chi_se, rho0_se, method='chi'))
         rss_chi.append(pt_fit.predict(As, chi_ss, rho0_se, method='chi'))
 
@@ -157,8 +164,8 @@ ax.legend()
 # ========================= Non-Markovianity Test =========================\
 T_mat_fit_avg = np.average(np.array([pt_fit.T_mat for pt_fit in ptensors_fit]),
                            axis=0)
-pt_fit = ptf.PTensorPM(T_mat=T_mat_fit_avg)
-pt_fit.T_choi = pt_fit.matrix_to_choi()
+PT_exp = ptf.PTensorPM(T_mat=T_mat_fit_avg)
+PT_exp.T_choi = PT_exp.matrix_to_choi()
 
 # Trace out the tensor using A0
 basis = 'pm'
@@ -179,11 +186,11 @@ for theta in A0_thetas:
     else:
         raise Exception('can not reduce map in {}'.format(basis))
 
-    A_N_s = pt_cal.N * [None]
+    A_N_s = PT_cal.N * [None]
     A_N_s[0] = A0
     # psd_options.update({'ftol': 1E-16, 'maxiter': 1000})
-    T_choi_1p_cal = pt_cal.trace(A_N_s)
-    T_choi_1p_fit = pt_fit.trace(A_N_s, options=psd_options)  # fitting
+    T_choi_1p_cal = PT_cal.trace(A_N_s)
+    T_choi_1p_fit = PT_exp.trace(A_N_s, options=psd_options)  # fitting
     # T_choi_1p_fit = qmath.matrixize(T_choi_1p_fit)
     # vals = vals - min(vals)
     # vals = vals / np.sum(vals)

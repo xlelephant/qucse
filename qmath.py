@@ -332,6 +332,14 @@ def super2mat(A, C=None, order=VEC_ORDER, left_dot=True):
         raise NotImplementedError()
 
 
+def mat2choi(M):
+    # M(r1 s1:r0 s0)
+    # C(r1 r0:s1 s0)
+    d = int(np.size(M)**0.25)
+    M = np.reshape(M, (d, d, d, d))
+    return np.transpose(M, [0, 2, 1, 3])
+
+
 def liouville_H(H):
     """Convert Hamiltonian in Hilbert space to liouville space
     The origin H is on a 2 dim basis, then the results should be 4 dim

@@ -127,8 +127,8 @@ ZERO_RHO_TH = 1E-6
 #         # # get rhos at step out_idx conditioned on As on later steps
 #         # # should not pass if we did not herald the state on later steps
 #         # print('out index: ', out_idx, As_ops)
-#         # r_cal = process_tensor.trace(As_ops, T_choi_cal, out_idx)
-#         # r_fit = process_tensor.trace(As_ops, T_choi_fit, out_idx)
+#         # r_cal = process_tensor.contract(As_ops, T_choi_cal, out_idx)
+#         # r_fit = process_tensor.contract(As_ops, T_choi_fit, out_idx)
 #         # assert np.allclose(r_sim, r_cal), '\n{}\n{}'.format(r_sim, r_cal)
 #         # assert np.allclose(r_cal, r_fit), '\n{}\n{}'.format(r_cal, r_fit)
 #         # print('conditional rhos at step {} allclose to \n{}'.format(
@@ -139,8 +139,8 @@ ZERO_RHO_TH = 1E-6
 #         r_sim = process_tensor.trace_env(rse_sim)
 #         A_I_s = process_tensor.N * ['I']
 #         A_I_s[:out_idx] = As_ops[:out_idx]
-#         r_cal = PT_cal.trace(A_I_s, out_idx=out_idx)
-#         r_fit = PT_fit.trace(A_I_s, out_idx=out_idx)
+#         r_cal = PT_cal.contract(A_I_s, out_idx=out_idx)
+#         r_fit = PT_fit.contract(A_I_s, out_idx=out_idx)
 #         assert np.allclose(r_sim, r_cal), '\n{}\n{}'.format(r_sim, r_cal)
 #         assert np.allclose(r_fit, r_cal), '\n{}\n{}'.format(r_fit, r_cal)
 #         print('average rhos at step {} allclose to \n{}'.format(
@@ -160,12 +160,12 @@ for idx in [0, 1]:
     As_ops = ['Pyz+', 'I']
     A_I_s[:idx] = As_ops[:idx]
     A_I_s[idx] = None
-    PT_lam_cal = ptf.PTensorPM(T_choi=PT_cal.trace(A_I_s, out_idx=idx + 1))
+    PT_lam_cal = ptf.PTensorPM(T_choi=PT_cal.contract(A_I_s, out_idx=idx + 1))
     chi_cal = PT_lam_cal.lam_to_chi(pms=qst.TOMO_BASIS_OPS['pm_octomo'])
     As_ops = ['Pyz+', 'I']
     A_I_s[:idx] = As_ops[:idx]
     A_I_s[idx] = None
-    PT_lam_fit = ptf.PTensorPM(T_choi=PT_fit.trace(A_I_s, out_idx=idx + 1))
+    PT_lam_fit = ptf.PTensorPM(T_choi=PT_fit.contract(A_I_s, out_idx=idx + 1))
     chi_fit = PT_lam_fit.lam_to_chi(pms=qst.TOMO_BASIS_OPS['pm_octomo'])
 
     labels = qpt.pauli_vector_ops
@@ -227,14 +227,14 @@ for idx in [0, 1]:
 #     A_N_s[0] = (theta, 0) if basis == 'pm' else 'X'
 
 #     PT_pm_cal = ptf.PTensorPM(T_choi=PT_cal.T_choi)
-#     PT_1p_cal = ptf.PTensorPM(PT_pm_cal.trace(A_N_s))
+#     PT_1p_cal = ptf.PTensorPM(PT_pm_cal.contract(A_N_s))
 #     print("cal Markovianity for Cal")
 #     entropies_cal.append(PT_1p_cal.non_markovianity())
 #     # entropies_cal.append(
 #     #     PT_1p_cal.non_markovianity(options=options) / np.cos(theta / 2)**2)
 
 #     print("cal Markovianity for PM")
-#     PT_1p_fit = ptf.PTensorPM(T_choi=PT_fit.trace(A_N_s))
+#     PT_1p_fit = ptf.PTensorPM(T_choi=PT_fit.contract(A_N_s))
 #     entropies_fit.append(PT_1p_fit.non_markovianity())
 #     # entropies_fit.append(
 #     #     PT_1p_fit.non_markovianity(options=options) / np.cos(theta / 2)**2)

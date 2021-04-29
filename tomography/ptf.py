@@ -40,13 +40,8 @@ ZERO_RHO_TH = 1E-6
 
 QST_BASIS = 'tomo'
 QST_PMs = ['Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+']
-# should be more than enough for QST!
-# QST_BASIS = 'smtc_tomo'
-# QST_PMs = [
-#     'Pz+', 'Pz-', 'Py+', 'Py-', 'Px-', 'Px+', 'Pyx+', 'Pyx-', 'Pxy-', 'Pxy+',
-#     'Pxz+', 'Pxz-', 'Pyz+', 'Pyz-', 'Pzx+', 'Pzx-', 'Pzy+', 'Pzy-'
-# ]
-
+# this choice is fixed in the paper
+# the result of bilinear map should differ if choosing others
 QPT_PMs = qst.TOMO_BASIS_OPS['pm_octomo']
 
 
@@ -210,6 +205,13 @@ class ProcessTensor(object):
             Us_choi = qmath.tensor((U_choi, Us_choi))
         return Us_choi
 
+    def trace(self, T_choi=None):
+        T_choi = self.T_choi if T_choi is None else T_choi
+        T_choi = self.matrix_to_choi(self.T_mat) if T_choi is None else T_choi
+        trace_val = np.trace(qmath.matrixize(T_choi))
+        assert trace_val.imag < 1E-6
+        return trace_val.real
+
     # Derive the process tensor
 
     def cal(self, rho_se, Us, return_format='choi'):
@@ -333,8 +335,15 @@ class ProcessTensor(object):
             U = qops.get_op(U) if isinstance(U, str) else U
             A_se = qmath.tensor((A, qmath.sigma_I(self.D_E)))
             rho_se = A_se @ rho_se @ A_se.conjugate().transpose()
-            rho_se = U @ rho_se @ U.conjugate().transpose()
+            if np.size(U) == (self.D_S * self.D_E)**2:
+                rho_se = U @ rho_se @ U.conjugate().transpose()
+            elif np.size(U) == (self.D_S * self.D_E)**4:
+                rho_se = qpt.cal_process_rho(rho_se, U)
         return rho_se
+
+    def rhos_out_ideal(self, rho0, As, Us):
+        rho_se = self.rhose_out_ideal(rho0, As, Us)
+        return self.trace_env(rho_se)
 
     def sim(self, rho0, Bss, Us, return_format='matrix', options=None):
         """Simulate the closed two-qubit evolution process and fit the
@@ -415,7 +424,7 @@ class ProcessTensor(object):
         return rho_m
 
     # Transformations
-    def trace(self, As, T_choi=None, out_idx=-1):
+    def contract(self, As, T_choi=None, out_idx=-1):
         """
         T_Choi(r2 r1'r1 r0'r0 :: s2 s1's1 s0's0)
         A_Choi( 𝟙 r1'r1 r0'r0 ::  𝟙 s1's1 s0's0)
@@ -541,47 +550,38 @@ class ProcessTensor(object):
         return np.transpose(np.reshape(lam_mat, 4 * [D_S]), [0, 2, 1, 3])
 
     def choi_to_product_state(self, T_choi=None, options=None):
+        """return the unormalized product state of the choi state"""
         D_S, _ = self.D_S, self.D_E
         T_choi = self.T_choi if T_choi is None else T_choi
         A_s = ['I'] * self.N
         prod_state = 1
-        rho0_avg = self.trace(A_s, T_choi, out_idx=0)
+        rho0_avg = self.contract(A_s, T_choi, out_idx=0)
+        lams = [rho0_avg]
         if self.N == 1:
-            lam = self.choi_1_to_lam(T_choi)
-            prod_state = qmath.tensor([lam, rho0_avg])
+            lams.insert(0, self.choi_1_to_lam(T_choi))
         else:
             for i in range(self.N):
                 A_s = ['I'] * self.N
                 A_s[i] = None
                 if options is None:
-                    T1_choi = self.trace(A_s, T_choi, out_idx=i + 1)
+                    T1_choi = self.contract(A_s, T_choi, out_idx=i + 1)
                 else:
-                    T1_choi = self.trace(A_s, T_choi, out_idx=i + 1,
-                                         options=options)
-                lam = self.choi_1_to_lam(T1_choi)
-                prod_state = qmath.tensor([lam, prod_state])
-            prod_state = qmath.tensor([prod_state, rho0_avg])
+                    T1_choi = self.contract(A_s, T_choi, out_idx=i + 1,
+                                            options=options)
+                lams.insert(0, self.choi_1_to_lam(T1_choi))
+        prod_state = qmath.tensor([qmath.matrixize(lam) for lam in lams])
         return np.reshape(prod_state, [D_S, D_S] * (2 * self.N + 1))
 
-    def non_markovianity(self):
-        basis = self.basis
-        assert self.N == 1
-        A_s_rho0 = ['I'] * self.N
-        rho_avg = self.trace(A_s_rho0, out_idx=0)
-        lam_tr = np.trace(self.T_choi, axis1=2, axis2=5).reshape(2, 2, 2, 2)
-        lam_qpt = qmath.matrixize(self.choi_1_to_lam(self.T_choi))
-        resize_factor = np.trace(lam_qpt) / np.trace(qmath.matrixize(lam_tr))
-        print('resize factor is ', resize_factor)
-        lam_tr = qmath.matrixize(lam_tr) * resize_factor
-        assert np.allclose(lam_tr, lam_qpt), '{} \n {}'.format(lam_tr, lam_qpt)
-        T_markov = qmath.tensor(
-            [qmath.matrixize(lam_qpt) / resize_factor, rho_avg / resize_factor])
+    def normalize(self, factor=None):
+        factor = self.trace() if factor is None else factor
+        print('normalization factor is ', factor)
+        return self.T_choi / factor
 
-        choi_state_corlat = qmath.matrixize(self.T_choi)
-        choi_state_markov = qmath.matrixize(T_markov)
-        D_relative_entropy = qmath.relative_entropy(choi_state_corlat,
-                                                    choi_state_markov)
-        return D_relative_entropy
+    def non_markovianity(self, T_prod=None):
+        T_prod = self.choi_to_product_state() if T_prod is None else T_prod
+        T_markov = qmath.matrixize(T_prod)  # trace is equal to T_correl
+        T_correl = qmath.matrixize(self.T_choi)
+        return qmath.relative_entropy(T_correl, T_markov)
 
 
 class PTensorUC(ProcessTensor):
@@ -598,8 +598,8 @@ class PTensorPM(ProcessTensor):
         super().__init__(T_choi=T_choi, T_mat=T_mat)
         self.basis = 'pm'
 
-    def trace(self, As, T_choi=None, out_idx=-1, int_ops=['Pz+', 'Pz-'],
-              options=None):
+    def contract(self, As, T_choi=None, out_idx=-1, int_ops=['Pz+', 'Pz-'],
+                 options=None):
         """
         T_Choi(r2 r1'r1 r0'r0 :: s2 s1's1 s0's0)
         A_Choi( 𝟙 r1'r1 r0'r0 ::  𝟙 s1's1 s0's0)
@@ -686,7 +686,7 @@ class PTensorPM(ProcessTensor):
                         A_s[i] = Bss_op[Bs_els]
                         Bs_els += 1
                 # Now calcuate the rho * p at out_idx
-                rho_k = self.trace(A_s, T_choi, out_idx=out_idx)
+                rho_k = self.contract(A_s, T_choi, out_idx=out_idx)
                 rhos_out.append(rho_k)
             # tomography.plotTrajectory(rhos_out)
             T_mat = self.fit(Bss_ops, rhos_out, options=options)
@@ -700,10 +700,11 @@ class PTensorPM(ProcessTensor):
         Lambdas = []
         Chis = []
         for i in range(self.N):
-            Rho0s.append(self.trace(A_s_rho0, T_choi, out_idx=i))
+            Rho0s.append(self.contract(A_s_rho0, T_choi, out_idx=i))
             A_s_lam = ['I'] * self.N
             A_s_lam[i] = None
-            T_lam = self.trace(A_s_lam, T_choi, out_idx=i + 1, options=options)
+            T_lam = self.contract(A_s_lam, T_choi, out_idx=i + 1,
+                                  options=options)
             Chis.append(self.lam_to_chi(T_lam))
             Lambdas.append(T_lam)
         self.Rho0s = Rho0s
@@ -722,32 +723,24 @@ class PTensorPM(ProcessTensor):
         self.T_choi_prod = self.matrix_to_choi(T_mat)
         return self.T_choi_prod
 
-    def non_markovianity(self, T_choi_ref=None, options=None):
+    @staticmethod
+    def fit_err(As_vec, rho_vec, M):
+        err_fit = np.linalg.norm(rho_vec - np.dot(As_vec, M)).real
+        return err_fit
+
+    @staticmethod
+    def entropy_err(T_corr, T_prod):
+        err_etp = abs(qmath.relative_entropy(T_corr, T_prod))
+        return err_etp
+
+    def non_markovianity(self, T_markov, T_guess=None, options=None):
         """the reference full tensor"""
-        basis = self.basis
-        assert self.N == 1
-        A_s_rho0 = ['I'] * self.N
-        rho_avg = self.trace(A_s_rho0, out_idx=0)
-        lam_qpt = qmath.matrixize(self.choi_1_to_lam(T_choi=self.T_choi))
+        T_markov = qmath.matrixize(T_markov)
+        T_correl = self.T_choi if T_guess is None else T_guess
 
-        # reference full process tensor
-        ref_tensor = self.T_choi if T_choi_ref is None else T_choi_ref
-        lam_ref = np.trace(ref_tensor, axis1=2, axis2=5).reshape(2, 2, 2, 2)
-        lam_ref = qmath.matrixize(lam_ref)
-        resize_factor = np.trace(lam_qpt) / np.trace(qmath.matrixize(lam_ref))
-        print('resize factor is ', resize_factor)
-        lam_qpt_resize = lam_qpt / resize_factor
-        # ideal case
-        # assert np.allclose(lam_ref, lam_qpt_resize), '{} \n {}'.format(
-        #     lam_ref, lam_qpt_resize)
-        T_markov = qmath.tensor([lam_qpt_resize, rho_avg / resize_factor])
-
-        T_correl = qmath.matrixize(self.T_choi)
-        # return a contracted process tensor
-        # loop over fit basis (B_k:j)
         As_vec = []
         rho_vec = []
-        for As in basis_ops('pm', self.N, complement=False):
+        for As in basis_ops('pm', self.N, complement=None):
             # put Bs fit to None of As
             rho_m = self.predict(As, method='choi')
             rho_vec.append(rho_m)
@@ -755,33 +748,59 @@ class PTensorPM(ProcessTensor):
             AsAs = qmath.tensor([qmath.super2mat(A) for A in As[::-1]])
             As_vec.append(AsAs.reshape(-1))
         rho_vec = np.reshape(rho_vec, (len(rho_vec), -1))
+        error = self.fit_err(As_vec, rho_vec, self.choi_to_matrix())
+        assert np.allclose(error, 0), error
 
-        tmp_i = 0
+        T_correl = qmath.matrixize(T_correl)
 
-        def err_func(T):
-            M = self.choi_to_matrix(T)
-            epison = np.linalg.norm(rho_vec - np.dot(As_vec, M))
-            epison += qmath.relative_entropy(T, T_markov).real * 1E-2
+        if options is None:
+            pass
+        else:
+
+            # def err_func(T):
+            #     M = self.choi_to_matrix(T)
+            #     err_fit = self.fit_err(As_vec, rho_vec, M)
+            #     err_nm = self.entropy_err(T, T_markov)
+            #     global tmp_i
+            #     tmp_i += 1
+            #     if not (tmp_i % 100):
+            #         print(
+            #             tmp_i, 'current fit_err={}, psf_err={}'.format(
+            #                 err_fit, err_nm))
+            #     return err_fit  # + abs(err_nm)
+
+            # T_correl = psd.lstsq(err_func, T_correl, unit_trace=False,
+            #                      real=options['real'], disp=False, method=None,
+            #                      options={
+            #                          'gtol': 1E-4,
+            #                          'maxiter': 10
+            #                      })
+
+            def err_func(T_choi):
+                global tmp_i
+                global err_fit
+                M = self.choi_to_matrix(T_choi)
+                err_fit = self.fit_err(As_vec, rho_vec, M)
+                err_nm = self.entropy_err(T_choi, T_markov)
+                tmp_i += 1
+                if not (tmp_i % 1000):
+                    print(
+                        tmp_i, 'current fit_err={}, psf_err={}'.format(
+                            err_fit, err_nm))
+                # return err_fit + abs(err_nm) * 1E-2
+                if err_nm.real < 0:
+                    return err_fit + abs(err_nm) * 1E2
+                else:
+                    return err_fit + abs(err_nm) * 5E-2
+
+            T_correl = psd.lstsq(err_func, T_correl, unit_trace=False,
+                                 real=options['real'], disp=False,
+                                 method='SLSQP', options=options)
             global tmp_i
-            tmp_i += 1
-            if not (tmp_i % 500):
-                print(tmp_i, 'current loss is ', epison)
-            return epison
-
-        tmp_i = 0
-        T_correl = psd.lstsq(err_func, T_correl, unit_trace=False,
-                             real=options['real'], disp=False, method=None,
-                             options={
-                                 'gtol': 1E-4,
-                                 'maxiter': 10
-                             })
-        tmp_i = 0
-        T_correl = psd.lstsq(err_func, T_correl, unit_trace=False,
-                             real=options['real'], disp=False,
-                             method=options['method'], options=options)
-
-        D_relative_entropy = qmath.relative_entropy(T_correl, T_markov)
-        return D_relative_entropy
+            tmp_i = 0
+        print('tr of fitted nm PTs are', np.trace(T_correl),
+              np.trace(T_markov))
+        return qmath.relative_entropy(T_correl, T_markov), err_fit
 
 
 # REFERENCES:

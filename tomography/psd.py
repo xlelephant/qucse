@@ -14,10 +14,10 @@ def isPD(B):
         return False
 
 
-def lstsq(err_func, M0, unit_trace=True, real=True, disp=True, method='CG',
+def lstsq(err_func, T, unit_trace=True, real=True, disp=True, method='CG',
           options={}):
 
-    dim = square_matrix_dim(M0)
+    dim = square_matrix_dim(T)
 
     # numpy 1.4.0+
     indices_re = np.tril_indices(dim)
@@ -66,7 +66,7 @@ def lstsq(err_func, M0, unit_trace=True, real=True, disp=True, method='CG',
         mat = ts_to_mat(ts)
         return err_func(mat)
 
-    ts_guess = mat_to_ts(M0)
+    ts_guess = mat_to_ts(T)
 
     # find the local minimum of the loss_func function
     # Nelder-Mead simple algorithm
