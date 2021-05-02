@@ -14,7 +14,7 @@ dvw = DataVaultWrapper(Sample)
 
 # FIG 3
 ptf_idx_init = 1368
-ptf_idx_els = 1
+ptf_idx_els = 20
 pt_set_num = np.concatenate([np.arange(53, 53 + 3),
                              np.arange(0, 17)])[:ptf_idx_els]
 
@@ -109,7 +109,7 @@ for idx, d_num in enumerate(pt_set_num):
     for _, r0, s2, s1, c2, c1, rpt in zip(range(len(All_ops)), rss_exp,
                                           rse_sim, rss_sim, rse_chi, rss_chi,
                                           rss_ptf):
-        imtol = 1E-2 if psd_options is not None else 0.7
+        imtol = 1E-1 if psd_options is not None else 0.7
         warn = True
         f_mkv.append(qmath.fidelity_rho(s1, s2, noisy=warn))
         # f_se_i.append(qmath.fidelity_rho(s2_i, r0, imag_atol=imtol, noisy=warn))

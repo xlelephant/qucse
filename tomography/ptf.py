@@ -97,6 +97,7 @@ def ops2str(ops):
 
 class ProcessTensor(object):
     """full process tensor"""
+
     def __init__(self, T_choi=None, T_mat=None):
         self.D_S = 2  # dimension of system
         self.D_E = 2  # dimension of environment
@@ -148,15 +149,18 @@ class ProcessTensor(object):
             # sk
             T_order += [[4 * step_els + 1]]
             # si', si
-            T_order += [[2 * i + 1, 2 * (step_els + i) + 1]
-                        for i in range(step_els)]
+            T_order += [
+                [2 * i + 1, 2 * (step_els + i) + 1] for i in range(step_els)
+            ]
         else:
             # ri',si'
-            T_order = [[1 + 2 * i, 2 + 2 * i + 2 * step_els]
-                       for i in range(step_els)]
+            T_order = [
+                [1 + 2 * i, 2 + 2 * i + 2 * step_els] for i in range(step_els)
+            ]
             # ri ,si
-            T_order += [[2 + 2 * i, 3 + 2 * i + 2 * step_els]
-                        for i in range(step_els)]
+            T_order += [
+                [2 + 2 * i, 3 + 2 * i + 2 * step_els] for i in range(step_els)
+            ]
             # rk ,sk
             T_order += [[0, 1 + 2 * step_els]]
         return sum(T_order, [])
@@ -304,13 +308,13 @@ class ProcessTensor(object):
             return epison
 
         global tmp_i
-        tmp_i = 0
-        T_choi_mat = psd.lstsq(err_func, T_choi_mat, unit_trace=False,
-                               real=options['real'], disp=False, method=None,
-                               options={
-                                   'gtol': 1E-4,
-                                   'maxiter': 10
-                               })
+        # tmp_i = 0
+        # T_choi_mat = psd.lstsq(err_func, T_choi_mat, unit_trace=False,
+        #                        real=options['real'], disp=False, method=None,
+        #                        options={
+        #                            'gtol': 1E-4,
+        #                            'maxiter': 10
+        #                        })
         tmp_i = 0
         T_choi_mat = psd.lstsq(err_func, T_choi_mat, unit_trace=False,
                                real=options['real'], disp=False,
@@ -396,8 +400,8 @@ class ProcessTensor(object):
                 rho_dim = qmath.square_matrix_dim(rho_in)
                 rho_in = self.trace_env(rho_in) if rho_dim != D_S else rho_in
                 for A, Chi in zip(As, Chis):
-                    if (isinstance(A, np.ndarray)
-                            and qmath.square_matrix_dim(A) == D_S**2):
+                    if (isinstance(A, np.ndarray) and
+                            qmath.square_matrix_dim(A) == D_S**2):
                         A_chi = A
                         rho_in = qpt.cal_process_rho(rho_in, A_chi)
                     else:
@@ -409,8 +413,8 @@ class ProcessTensor(object):
             elif chi_dim == (D_S * D_E)**2:
                 rho_in = rho_in
                 for A, Chi in zip(As, Chis):
-                    if (isinstance(A, np.ndarray)
-                            and qmath.square_matrix_dim(A) == D_S**2):
+                    if (isinstance(A, np.ndarray) and
+                            qmath.square_matrix_dim(A) == D_S**2):
                         rho_in = qpt.cal_process_rhose(rho_in, A)
                     else:
                         A = qops.get_op(A)
@@ -585,6 +589,7 @@ class ProcessTensor(object):
 
 
 class PTensorUC(ProcessTensor):
+
     def __init__(self, T_choi=None, T_mat=None):
         super().__init__(T_choi=T_choi, T_mat=T_mat)
         self.basis = 'uc'
@@ -594,6 +599,7 @@ class PTensorUC(ProcessTensor):
 
 
 class PTensorPM(ProcessTensor):
+
     def __init__(self, T_choi=None, T_mat=None):
         super().__init__(T_choi=T_choi, T_mat=T_mat)
         self.basis = 'pm'

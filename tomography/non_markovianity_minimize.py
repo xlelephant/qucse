@@ -5,7 +5,6 @@ from qucse_xl import qmath, qops
 from qucse_xl.tomography import qst, qpt, ptf, psd
 from qucse_xl.show.matrix import show_chi
 
-PT_exp = None
 np.set_printoptions(precision=6, suppress=True, linewidth=1000)
 
 num_steps = 2
@@ -87,7 +86,7 @@ for theta in A0_thetas[::-1]:
     # new fitting to ps-matrix
     options = {
         'ftol': 1E-8,
-        'maxiter': 100,
+        'maxiter': 200,
         'method': None,  # SLSQP
         'real': False
     }
@@ -104,36 +103,11 @@ for theta in A0_thetas[::-1]:
 
     entropies_fit.append(NM / PT1f_prod.trace())
 
-    if PT_exp is None:
-        continue
-    # ================ PT_fit (expr) non-markovianity ================
-    print("~~~~~~~~~~~~~ Get the nm of experimental data ~~~~~~~~~~~~~")
-    PT_1p_exp = ptf.PTensorPM(T_choi=PT_exp.contract(A_N_s))
-    PT1e_prod = ptf.ProcessTensor(T_choi=PT_1p_exp.choi_to_product_state())
-    print('tr PT exp are: ', PT_1p_exp.trace(), PT1e_prod.trace())
-
-    # PT1e_norm = ptf.PTensorPM(PT_1p_exp.normalize(factor=PT1e_prod.trace()))
-    # PT1e_prod_norm = ptf.ProcessTensor(T_choi=PT1e_prod.normalize())
-    NM, lsq_err = PT_1p_exp.non_markovianity(T_markov=PT1e_prod.T_choi,
-                                             T_guess=PT1e_prod.T_choi,
-                                             options=options)
-
-    entropies_exp.append(NM / PT1e_prod.trace())
-    exp_lsq_err.append(lsq_err)
-
 ax = plt.figure().add_subplot()
 ax.plot(xs, np.array(entropies_cal).real, '-', label='N_cal')
 # ax.plot(xs, np.array(entropies_cal).imag, '-.', label='N_cal imag')
 ax.plot(xs, np.array(entropies_fit).real, '--', label='N_fit')
 # ax.plot(xs, np.array(entropies_fit).imag, '-.', label='N_fit imag')
-if PT_exp is not None:
-    ax.plot(xs, np.array(entropies_exp).real, '--', label='N_exp real')
-    ax.plot(xs, np.array(entropies_exp).imag, '-.', label='N_exp imag')
-    ax.bar(xs,
-           np.array(exp_lsq_err) * 1E2,
-           abs(xs[1] - xs[0]) * 0.3, fc='k', ec='None', lw=2, alpha=0.5,
-           label='lsq err[%] PT_argmin(NM)')
-
 ax.plot([0.5, 0.5], [0, np.max(entropies_cal)], 'k')
 ax.plot(0, 1, [np.log(2)] * 2, '-.k')
 ax.set_title('Non-markovianity of process {}'.format(Us_ops))

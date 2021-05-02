@@ -29,8 +29,8 @@ def _get_rhos_pm(dataset, fids, qst_basis):
     steps = int(np.log2(len(data[0, :]) / tomo_els / p01_els))
     ps_els = int(2**steps)
     ps_0s = data[:, 0::p01_els * ps_els]
-    ps_rs = [np.average(p_0s)
-             for p_0s in ps_0s]  # average over all tomos of As
+    # average over all tomos of As
+    ps_rs = [np.average(p_0s) for p_0s in ps_0s]
 
     # rho out probs of each basis
     probs = [data[:, 1 + i::p01_els * ps_els].reshape(-1) for i in range(2**N)]
@@ -70,8 +70,9 @@ def get_process_tensor(Bss_ops, rhos, ps=None, herald_th=HRD_TH, noisy=True,
         rho_out = [ps[i] * rhos[i] for i in valid_idx]
         Bss_ops = np.array(Bss_ops)[valid_idx]
     if options is not None:
-        ptensor.T_mat = ptensor.least_square_psd_fit(Bss_ops, rho_out, disp=noisy,
-                                     options=options)
+        ptensor.T_mat = ptensor.least_square_psd_fit(Bss_ops, rho_out,
+                                                     disp=noisy,
+                                                     options=options)
     else:
         ptensor.T_mat = ptensor.least_square_fit(Bss_ops, rho_out, disp=noisy)
     return ptensor
