@@ -4,7 +4,7 @@ from matplotlib import colors as mcolors
 from matplotlib import colorbar as mcolorbar
 
 
-def complex_phase_cmap(name='twilight'):
+def complex_phase_cmap(name='hsv'):
     # https://matplotlib.org/3.3.3/gallery/color/colormap_reference.html
     if name == 'phase_colormap':
         cdict = {
@@ -39,20 +39,15 @@ def bar3d_complex(matrix, xlabels=None, ylabels=None, title=None, fig=None,
         phase_min = phase_limits[0]
         phase_max = phase_limits[1]
     else:
-        phase_min = -np.pi
-        phase_max = np.pi
+        phase_min = 0
+        phase_max = 2 * np.pi
     norm = mcolors.Normalize(phase_min, phase_max)
     cmap = complex_phase_cmap()
 
     # check small values and set them to negative number (white)
-    # idx, = np.where(abs(Mvec) < 0.01)
-    # Mvec[idx] = abs(Mvec[idx])
-    colors = cmap(norm(np.angle(Mvec)))
-
+    colors = cmap(norm((np.angle(Mvec) + 2 * np.pi) % (2 * np.pi)))
     if threshold is not None:
-        colors[:, 3] = 1 * (dz > threshold)
-        colors[:, 3] = 0 * (dz <= threshold)
-
+        colors[dz <= threshold] = np.array([0.8, 0.8, 0.8 ,1])
     if ax is None:
         fig = plt.figure()
         ax = Axes3D(fig, azim=-35, elev=35)
@@ -83,9 +78,9 @@ def bar3d_complex(matrix, xlabels=None, ylabels=None, title=None, fig=None,
     if colorbar:
         cax, kw = mcolorbar.make_axes(ax, shrink=.75, orientation='vertical')
         cb = mcolorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
-        cb.set_ticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
+        cb.set_ticks([0, np.pi / 2, np.pi, np.pi * 3 / 2, 2 * np.pi])
         cb.set_ticklabels(
-            (r'$-\pi$', r'$-\pi/2$', r'$0$', r'$\pi/2$', r'$\pi$'))
+            (r'$0$', r'$\pi/2$', r'$\pi$', r'$3\pi/2$', r'$2\pi$'))
         cb.set_label('arg')
 
     return fig, ax
@@ -97,7 +92,7 @@ def show_chi(chi, labels, title=None, fig=None, ax=None, figsize=(6, 6),
     if ax is None:
         if fig is None:
             fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(1, 1, 1, projection='3d', position=[0, 0, 1, 1])
+        ax = fig.add_subplot(1, 1, 1, projection='3d', azim=-35, elev=35)
     else:
         colorbar = False
 

@@ -77,7 +77,11 @@ def trace_norm(A):
     ref:
     https://www.quantiki.org/wiki/trace-norm
     """
-    return np.trace(np.dot(A, A.conjugate().transpose()))
+    return np.trace(sqrtm(np.dot(A, A.conjugate().transpose())))
+
+
+def trace_distance(A, B):
+    return 0.5 * trace_norm(A - B)
 
 
 def unit_trace(A, flat_threshold=1e-5, noisy=True):

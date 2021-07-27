@@ -174,6 +174,10 @@ class ProcessTensor(object):
         return rho.reshape(self.D_S, self.D_E, self.D_S,
                            self.D_E).trace(axis1=1, axis2=3)
 
+    def trace_sys(self, rho):
+        return rho.reshape(self.D_S, self.D_E, self.D_S,
+                           self.D_E).trace(axis1=0, axis2=2)
+
     def A_to_AA(self, A):
         """convert local operation (Bilinear) to LeftMatrix form"""
         if not isinstance(A, np.ndarray):
