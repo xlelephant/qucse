@@ -12,157 +12,116 @@ Sample = load_user_sample(cxn, 'xiang')
 
 dvw = DataVaultWrapper(Sample)
 
-# FIG 3
-ptf_idx_init = 1368
-ptf_idx_els = 1
-pt_set_num = np.concatenate([np.arange(53, 53 + 3),
-                             np.arange(0, 17)])[:ptf_idx_els]
-
-Bss_ops = None
-Ass_ops = None
-Us_ops = None
-inits_op = None
-noisy = False
 pt_sel = 1
-fids_se_qpt = []
-fids_s_qpt = []
-fids_ptf = []
-ptensors_fit = []
-for idx, d_num in enumerate(pt_set_num):
-    data_num = ptf_idx_init + pt_sel + d_num * 2
-    print("dataset idx :", data_num, end='')
-    data = dvw[data_num]
-    if Bss_ops is None:
-        Bss_ops = eval(data.parameters['arg: Bss_ops'])
-        Ass_ops = eval(data.parameters['arg: Ass_ops'])
-        Us_ops = eval(data.parameters['arg: Us_ops'])
-        inits_op = eval(data.parameters['arg: inits_op'])
-    correct = eval(data.parameters['arg: correct'])
-    assert correct == True
-    q0 = data.parameters['q4']
-    fids = q0['calReadoutFids'] if correct else None
+Bss_ops = ptf.basis_ops(group='pm', steps=2, complement=False)
+Ass_ops = ptf.basis_ops(group='pm', steps=2, complement=True)
+if pt_sel == 0:
+    Us_ops = (("CZ",), ("CNOT",))
+elif pt_sel == 1:
+    Us_ops = (("CNOT",),("CZ",))
+inits_op = ('I', 'I')
+noisy = False
 
-    # data
-    # -> rho, prob
-    B_els = len(Bss_ops)
-    All_ops = Bss_ops + Ass_ops
-    rhos, ps = xrt_ptf.get_rhos_from_dataset(data, fids=fids)
-    # # -> process tensor
-    # psd_options = None
-    psd_options = {
-        # 'gtol': 1E-6,
-        'ftol': 1E-8,
-        'maxiter': 100,
-        'method': 'SLSQP',  # SLSQP
-        'real': False
-    }
-    # pt_fit = xrt_ptf.get_process_tensor(All_ops, rhos, ps, options=psd_options)
-    # ptensors_fit.append(pt_fit)
+B_els = len(Bss_ops)
+All_ops = Bss_ops + Ass_ops
 
-    # theoretical methods
-    rho0_se = qops.get_init_rho(inits_op)
-    Us = qops.get_ops(Us_ops)
+# theoretical methods
+rho0_se = qops.get_init_rho(inits_op)
+Us = qops.get_ops(Us_ops)
 
-    PT_cal = ptf.ProcessTensor()
-    PT_cal.T_choi = PT_cal.cal(rho0_se, Us)
+PT_cal = ptf.ProcessTensor()
+PT_cal.T_choi = PT_cal.cal(rho0_se, Us)
 
-    chi_se = [np.array(q0['Chi_' + '*'.join(s)]) for s in Us_ops]
-    chi_ss = [np.array(q0['Chi_TrE_' + '*'.join(s) + '(I*I)']) for s in Us_ops]
-    # idx_of_QPT_PMs = []
-    # for qpt_pm in ptf.QPT_PMs:
-    #     for Bs in enumerate(Bss_ops):
-    #     idx_of_QPT_PMs.append()
-    # chi_se[1] = qpt.qpt(rhos_in, rhos)
-    # plot
+rse_sim, rss_sim, rse_chi, rss_chi, rss_ptf = [], [], [], [], []
+Bs_sticks, As_sticks = [], []
+for i, As in enumerate(All_ops):
 
-    rss_exp, p_exp = [], []
-    rse_sim, rss_sim, rse_chi, rss_chi, rss_ptf = [], [], [], [], []
-    Bs_sticks, As_sticks = [], []
-    for i, As in enumerate(All_ops):
-        # ------------------ Predictions using Simulation -----------------
-        rho_ise = PT_cal.rhose_out_ideal(rho0_se, As, Us)
-        if (abs(rho_ise) < xrt_ptf.HRD_TH).all():
-            if noisy:
-                print('No.{} As {} is too small to be added!'.format(i, As))
-            continue
-        if i < B_els:
-            Bs_sticks.append(As)
-        else:
-            As_sticks.append(As)
-        rse_sim.append(PT_cal.trace_env(rho_ise))
+    # ------------------ Predictions using Simulation -----------------
 
-        # simulate the Markovian process of S for reference
-        rhose1 = ptf.ProcessTensor().rhose_out_ideal(rho0_se, As[:1], Us[:1])
-        chi21 = qpt.gen_ideal_chi_matrix(Us[1], As=ptf.QPT_PMs, rho0=rhose1,
-                                         zero_th=ptf.ZERO_RHO_TH)
-        rss_sim.append(PT_cal.predict(As[1:], [chi21], rhose1, method='chi'))
-        # chis_id = [
-        #     qpt.gen_ideal_chi_matrix(U, As=qst.TOMO_BASIS_OPS['pm_full'],
-        #                              rho0=rho0_se, zero_th=ptf.ZERO_RHO_TH,
-        #                              noisy=False) for U in Us
-        # ]
-        # rss_sim.append(PT_cal.predict(As, chis_id, rho0_se, method='chi'))
-        # # ------- predictions using fitted process map (linear QPT) -------
-        # rse_chi.append(pt_fit.predict(As, chi_se, rho0_se, method='chi'))
-        # rss_chi.append(pt_fit.predict(As, chi_ss, rho0_se, method='chi'))
+    rho_ise = PT_cal.rhose_out_ideal(rho0_se, As, Us)
+    if (abs(rho_ise) < xrt_ptf.HRD_TH).all():
+        if noisy:
+            print('No.{} As {} is too small to be added!'.format(i, As))
+        continue
+    if i < B_els:
+        Bs_sticks.append(As)
+    else:
+        As_sticks.append(As)
+    rse_sim.append(PT_cal.trace_env(rho_ise))
 
-        # # ------------ predictions using fitted process tensor ------------
-        # rss_ptf.append(pt_fit.predict(As, method='matrix'))
+    # simulate the Markovian process of S for reference
 
-        # rss_exp.append(rhos[i])
-        # p_exp.append(ps[i])
+    chis_id = [
+        qpt.gen_ideal_chi_matrix(U, As=qst.TOMO_BASIS_OPS['pm_octomo'],
+                                 rho0=rho0_se, zero_th=ptf.ZERO_RHO_TH,
+                                 noisy=False) for U in Us
+    ]
+    # rhose1 = ptf.ProcessTensor().rhose_out_ideal(rho0_se, As[:1], Us[:1])
+    rss_sim.append(PT_cal.predict(As, chis_id, rho0_se, method='chi'))
 
-    f_mkv, f_se_i, f_s_i, f_se_e, f_s_e, f_pt = [], [], [], [], [], []
-    for _, s2, s1, in zip(range(len(All_ops)),
-                                          rse_sim, rss_sim): # c2, c1, rpt #, rss_exp, rse_chi, rss_chi, rss_ptf
-        imtol = 1E-1 if psd_options is not None else 0.7
-        warn = True
-        f_mkv.append(qmath.fidelity_rho(s1, s2, noisy=warn))
-        # f_se_i.append(qmath.fidelity_rho(s2_i, r0, imag_atol=imtol, noisy=warn))
-        # f_s_i.append(qmath.fidelity_rho(s1, r0, imag_atol=imtol, noisy=warn))
-        # f_se_e.append(qmath.fidelity_rho(c2, r0, imag_atol=imtol, noisy=False))
-        # f_s_e.append(qmath.fidelity_rho(c1, r0, imag_atol=imtol, noisy=False))
-        # f_pt.append(qmath.fidelity_rho(rpt, r0, imag_atol=imtol, noisy=warn))
 
-    # fids_se_qpt.append(f_se_e)
-    # fids_s_qpt.append(f_s_e)
-    # fids_ptf.append(f_pt)
 
-    # print(" average fids for s_qpt, se_qpt, ptf are: ", np.average(f_s_e),
-    #       np.average(f_se_e), np.average(f_pt))
+f_mkv = []
+for _, s2, s1, in zip(range(len(All_ops)), rse_sim, rss_sim):
+    imtol = 1E-1
+    warn = True
+    f_mkv.append(qmath.fidelity_rho(s1, s2, noisy=warn))
 
+if pt_sel == 0:
+    fids_se_qpt = np.loadtxt("./qucse_xl/analysis_scripts/ptf_data/fids_(cz-cnot)_se_qpt.csv")
+    fids_s_qpt = np.loadtxt("./qucse_xl/analysis_scripts/ptf_data/fids_(cz-cnot)_s_qpt.csv")
+    fids_ptf = np.loadtxt("./qucse_xl/analysis_scripts/ptf_data/fids_(cz-cnot)_ptf.csv")
+elif pt_sel == 1:
+    fids_se_qpt = np.loadtxt("./qucse_xl/analysis_scripts/ptf_data/fids_(cnot-cz)_se_qpt.csv")
+    fids_s_qpt = np.loadtxt("./qucse_xl/analysis_scripts/ptf_data/fids_(cnot-cz)_s_qpt.csv")
+    fids_ptf = np.loadtxt("./qucse_xl/analysis_scripts/ptf_data/fids_(cnot-cz)_ptf.csv")
 # fid_se_avg = np.average(fids_se_qpt, axis=1)
 # fid_s_avg = np.average(fids_s_qpt, axis=1)
 # fid_ptf_avg = np.average(fids_ptf, axis=1)
 
 # f_se_qpt = np.average(fids_se_qpt, axis=0)
-# f_s_qpt = np.average(fids_s_qpt, axis=0)
-# f_ptf = np.average(fids_ptf, axis=0)
+f_s_qpt = np.average(fids_s_qpt, axis=0)
+f_ptf = np.average(fids_ptf, axis=0)
 
-# stds_s_chi = [np.std(fs_op) for fs_op in np.transpose(fids_s_qpt)]
-# stds_se_chi = [np.std(fs_op) for fs_op in np.transpose(fids_se_qpt)]
-# stds_ptf = [np.std(fs_op) for fs_op in np.transpose(fids_ptf)]
+stds_s_qpt = np.array([np.std(fs_op) for fs_op in np.transpose(fids_s_qpt)])
+stds_se_qpt = np.array([np.std(fs_op) for fs_op in np.transpose(fids_se_qpt)])
+stds_ptf = np.array([np.std(fs_op) for fs_op in np.transpose(fids_ptf)])
 
-# print('fids, std qpt(s): ', np.average(fids_s_qpt), np.average(stds_s_chi))
-# print('fids, std qpt(se): ', np.average(fids_se_qpt), np.average(stds_se_chi))
-# print('fids, std of ptf: ', np.average(fids_ptf), np.average(stds_ptf))
+print('fids, std qpt(s): ', np.average(fids_s_qpt), np.average(stds_s_qpt))
+# print('fids, std qpt(se): ', np.average(fids_se_qpt), np.average(stds_se_qpt))
+print('fids, std of ptf: ', np.average(fids_ptf), np.average(stds_ptf))
+print('fids, markov:', np.average(f_mkv))
+
 
 # show
-bar_width = 0.3
 ax = plt.figure(tight_layout=True).add_subplot()
-ax.set_ylim([0.4, 1.05])
-sel_els = len(Bs_sticks)
-xs = range(sel_els)
-ax.set_xticks(xs)
-ax.set_xticklabels(ptf.ops2str(Bs_sticks))
-line = ax.plot(xs, f_mkv[:sel_els], 'k', ds='steps-mid', lw=2,
+ax.set_ylim([0.42, 1.08])
+All_sticks = Bs_sticks + As_sticks
+sel_els = len(All_sticks)
+offset = 53 # 53 (xz) # 62 (yz) # 215 (zx) 233 (zy)
+offset = 9 * 4 - 1
+offset = 0
+offset = 9 * 3
+idx_xp = slice(0 + offset,8 + offset)
+idx_sel = idx_xp
+xs = range(sel_els)[idx_sel]
+line = ax.plot(xs, f_mkv[idx_sel], 'k', ds='steps-mid', lw=2,
                label='markov sim')
-# line = ax.bar(xs, f_s_qpt[:sel_els], bar_width, fc='r', ec='None', lw=2,
-#               alpha=0.3, label='qpt s')
-# line = ax.bar(xs, (np.array(f_se_qpt) - np.array(f_s_qpt))[:sel_els],
-#               bar_width, f_s_qpt[:sel_els], fc='None', ec='r', lw=2, alpha=0.8,
-#               label='qpt se - s')
-# # line = ax.plot(xs, f_ptf[:sel_els], '-.b', ds='steps-mid', lw=2, label='ptf')
-# line = ax.errorbar(xs, f_ptf[:sel_els], yerr=stds_ptf[:sel_els], fmt='-.b',
-#                    color='b')
+# line = ax.scatter(xs, f_s_qpt[idx_sel], '-r', lw=1, label='qpt s')
+# line = ax.errorbar(xs, f_s_qpt[idx_sel], yerr=stds_s_qpt[idx_sel], fmt='.r',
+#                    marker='o', color='r')
+line = ax.violinplot(fids_s_qpt[:,idx_sel], list(xs),
+                  showmeans=True,
+                  showmedians=False)
+# line = ax.boxplot(fids_s_qpt[:,idx_sel], positions=list(xs), whis=2.0)
+
+line = ax.plot(xs, f_ptf[idx_sel], '-')
+line = ax.scatter(xs, f_ptf[idx_sel], s=18, c='b', label='ptf')
+# line = ax.errorbar(xs, f_ptf[idx_sel], yerr=100*stds_ptf[idx_sel], fmt='-.b',
+#                    marker='o')
+# line = ax.boxplot(fids_ptf[:,idx_sel], positions=list(xs), whis=1000000.0)
+for x in xs:
+    line = ax.text(x-0.5, 1.02, s='{:.4f}'.format(f_ptf[x]))
+ax.set_xticks(xs)
+ax.set_xticklabels(ptf.ops2str(All_sticks[idx_sel]))
 ax.legend()
